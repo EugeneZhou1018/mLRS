@@ -12,6 +12,7 @@
 
 #define DEVICE_HAS_OUT
 #define DEVICE_HAS_FAN_ONOFF
+#define DEVICE_HAS_DRONECAN
 
 
 #include "hal-matek-mr-g431kb-common.h"
@@ -30,7 +31,8 @@
 // UART = output port, SBus or whatever
 // UARTC = debug port
 
-#define UARTB_USE_UART1_PA9PA10 // serial
+//XX #define UARTB_USE_UART1_PA9PA10 // serial
+#define UARTB_USE_LPUART1_PA2PA3
 #define UARTB_BAUD                RX_SERIAL_BAUDRATE
 #define UARTB_USE_TX
 #define UARTB_TXBUFSIZE           RX_SERIAL_TXBUFSIZE // 1024 // 512
@@ -46,7 +48,8 @@
 //#define UART_USE_RX
 //#define UART_RXBUFSIZE            512
 
-#define UARTC_USE_LPUART1_PA2PA3 // debug
+//XX #define UARTC_USE_LPUART1_PA2PA3 // debug
+#define UARTC_USE_UART1_PA9PA10
 #define UARTC_BAUD                115200
 #define UARTC_USE_TX
 #define UARTC_TXBUFSIZE           512
