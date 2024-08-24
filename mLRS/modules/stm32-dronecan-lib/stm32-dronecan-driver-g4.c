@@ -52,7 +52,29 @@ static FDCAN_HandleTypeDef hfdcan;
 
 static void _process_error_status(void)
 {
-    // TODO
+//    FDCAN_ProtocolStatusTypeDef protocolStatus;
+//    HAL_FDCAN_GetProtocolStatus(&hfdcan, &protocolStatus);
+//    if (protocolStatus.BusOff) {
+//        CLEAR_BIT(hfdcan.Instance->CCCR, FDCAN_CCCR_INIT);
+//    }
+    uint32_t psr = READ_REG(hfdcan.Instance->PSR); // read the protocol status register
+
+    if ((psr & FDCAN_PSR_BO) != 0) { // is bus off
+        CLEAR_BIT(hfdcan.Instance->CCCR, FDCAN_CCCR_INIT);
+        dc_hal_stats.error_count++;
+        HAL_FDCAN_AbortTxRequest(&hfdcan, FDCAN_TX_BUFFER0 | FDCAN_TX_BUFFER1 | FDCAN_TX_BUFFER2);
+    };
+
+    uint32_t lec = (psr & FDCAN_PSR_LEC) >> FDCAN_PSR_LEC_Pos;
+    uint32_t dlec = (psr & FDCAN_PSR_DLEC) >> FDCAN_PSR_DLEC_Pos;
+    if ((lec != FDCAN_PROTOCOL_ERROR_NONE && lec != FDCAN_PROTOCOL_ERROR_NO_CHANGE) ||
+        (dlec != FDCAN_PROTOCOL_ERROR_NONE && dlec != FDCAN_PROTOCOL_ERROR_NO_CHANGE)) {
+        CLEAR_BIT(hfdcan.Instance->PSR, FDCAN_PSR_LEC | FDCAN_PSR_DLEC);
+        dc_hal_stats.error_count++;
+        if (dc_hal_abort_tx_on_error) {
+            HAL_FDCAN_AbortTxRequest(&hfdcan, FDCAN_TX_BUFFER0 | FDCAN_TX_BUFFER1 | FDCAN_TX_BUFFER2);
+        }
+    }
 }
 
 
@@ -220,6 +242,8 @@ int16_t dc_hal_transmit(const CanardCANFrame* const frame)
 //-------------------------------------------------------
 // Receive
 //-------------------------------------------------------
+#ifndef DRONECAN_USE_RX_ISR
+//-- Polling
 
 int16_t dc_hal_receive(CanardCANFrame* const frame)
 {
@@ -275,6 +299,184 @@ int16_t dc_hal_receive(CanardCANFrame* const frame)
     return 0;
 }
 
+#else // !DRONECAN_USE_RX_ISR
+//-- ISR
+
+//#define DRONECAN_RXFRAMEBUFSIZE  64 // that's hopefully sufficient, catches CAN-29bit frames for 4.2 ms
+
+#define DRONECAN_RXFRAMEBUFSIZEMASK  (DRONECAN_RXFRAMEBUFSIZE-1)
+
+volatile CanardCANFrame dronecan_rxbuf[DRONECAN_RXFRAMEBUFSIZE];
+volatile uint16_t dronecan_rxwritepos; // pos at which the last frame was stored
+volatile uint16_t dronecan_rxreadpos; // pos at which the next frame is to be fetched
+
+
+void _dc_hal_receive_isr(FDCAN_RxHeaderTypeDef* const pRxHeader, uint8_t* const data)
+{
+CanardCANFrame frame;
+
+    if (pRxHeader->BitRateSwitch != FDCAN_BRS_OFF) {
+        return;
+    }
+    if (pRxHeader->FDFormat != FDCAN_CLASSIC_CAN) {
+        return;
+    }
+    if (pRxHeader->IsFilterMatchingFrame != 0) {
+        // TODO
+    }
+    // DroneCAN uses only EXT frames, so these should be errors
+    if (pRxHeader->IdType != FDCAN_EXTENDED_ID) {
+        return;
+    }
+    if (pRxHeader->RxFrameType != FDCAN_DATA_FRAME) {
+        return;
+    }
+
+    frame.data_len = pRxHeader->DataLength >> 16;
+    if (frame.data_len > 8) {
+        return;
+    }
+
+    frame.id = (pRxHeader->Identifier & CANARD_CAN_EXT_ID_MASK);
+    frame.id |= CANARD_CAN_FRAME_EFF;
+
+    //memset(frame.data, 0, 8);
+    memcpy(frame.data, data, frame.data_len);
+
+    frame.iface_id = 0;
+
+    uint16_t next = (dronecan_rxwritepos + 1) & DRONECAN_RXFRAMEBUFSIZEMASK;
+    if (dronecan_rxreadpos != next) { // fifo not full
+        dronecan_rxwritepos = next;
+        memcpy((uint8_t*)&(dronecan_rxbuf[next]), &frame, sizeof(CanardCANFrame));
+    } else {
+        dc_hal_stats.rx_overflow_count++;
+        dc_hal_stats.error_count++;
+    }
+}
+
+
+// is already C context, not C++ !
+void FDCAN1_IT0_IRQHandler(void)
+{
+    //HAL_FDCAN_IRQHandler(&hfdcan);
+    // copy the part relevant to us
+
+    uint32_t RxFifo0ITs = hfdcan.Instance->IR & (FDCAN_IR_RF0L | FDCAN_IR_RF0F | FDCAN_IR_RF0N); // __HAL_FDCAN_GET_FLAG()
+    RxFifo0ITs &= hfdcan.Instance->IE; // __HAL_FDCAN_GET_IT_SOURCE()
+    uint32_t RxFifo1ITs = hfdcan.Instance->IR & (FDCAN_IR_RF1L | FDCAN_IR_RF1F | FDCAN_IR_RF1N);
+    RxFifo1ITs &= hfdcan.Instance->IE;
+
+    if (RxFifo0ITs != 0U) {
+        __HAL_FDCAN_CLEAR_FLAG(&hfdcan, RxFifo0ITs); // clear Rx FIFO0 flags
+
+        if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != 0) {
+            FDCAN_RxHeaderTypeDef RxHeader;
+            uint8_t data[64];
+            if (HAL_FDCAN_GetRxMessage(&hfdcan, FDCAN_RX_FIFO0, &RxHeader, data) == HAL_OK) {
+                _dc_hal_receive_isr(&RxHeader, data);
+            }
+        }
+
+        if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_MESSAGE_LOST) != 0) {
+            dc_hal_stats.error_count++;
+        }
+        if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_FULL) != 0) {
+            dc_hal_stats.rx_overflow_count++;
+            dc_hal_stats.error_count++;
+        }
+    }
+
+    if (RxFifo1ITs != 0U) {
+        __HAL_FDCAN_CLEAR_FLAG(&hfdcan, RxFifo1ITs); // clear Rx FIFO1 flags
+
+        if ((RxFifo1ITs & FDCAN_IT_RX_FIFO1_NEW_MESSAGE) != 0) {
+            FDCAN_RxHeaderTypeDef RxHeader;
+            uint8_t data[64];
+            if (HAL_FDCAN_GetRxMessage(&hfdcan, FDCAN_RX_FIFO1, &RxHeader, data) == HAL_OK) {
+                _dc_hal_receive_isr(&RxHeader, data);
+            }
+        }
+
+        if ((RxFifo1ITs & FDCAN_IT_RX_FIFO1_MESSAGE_LOST) != 0) {
+            dc_hal_stats.error_count++;
+        }
+        if ((RxFifo1ITs & FDCAN_IT_RX_FIFO1_FULL) != 0) {
+            dc_hal_stats.rx_overflow_count++;
+            dc_hal_stats.error_count++;
+        }
+    }
+
+    #define FDCAN_ERROR_MASK (FDCAN_IR_ELO | FDCAN_IR_WDI | FDCAN_IR_PEA | FDCAN_IR_PED | FDCAN_IR_ARA)
+    #define FDCAN_ERROR_STATUS_MASK (FDCAN_IR_EP | FDCAN_IR_EW | FDCAN_IR_BO)
+
+    uint32_t Errors = hfdcan.Instance->IR & FDCAN_ERROR_MASK;
+    Errors &= hfdcan.Instance->IE;
+    uint32_t ErrorStatusITs = hfdcan.Instance->IR & FDCAN_ERROR_STATUS_MASK;
+    ErrorStatusITs &= hfdcan.Instance->IE;
+
+    if (Errors != 0) {
+        __HAL_FDCAN_CLEAR_FLAG(&hfdcan, Errors); // clear the Error flags
+        dc_hal_stats.error_count++;
+    }
+    if (ErrorStatusITs != 0) {
+        __HAL_FDCAN_CLEAR_FLAG(&hfdcan, ErrorStatusITs); // clear the Error flags
+        dc_hal_stats.error_count++;
+    }
+}
+
+
+//-- API
+
+int16_t dc_hal_enable_isr(void)
+{
+HAL_StatusTypeDef hres;
+
+    dronecan_rxwritepos = 0;
+    dronecan_rxreadpos = 0;
+
+/* doc in stm32g4xx_hal_fdcan.c says: By default, all interrupts are assigned to line 0
+    hres = HAL_FDCAN_ConfigInterruptLines(
+        &hfdcan,
+        FDCAN_IT_GROUP_RX_FIFO0 | FDCAN_IT_GROUP_RX_FIFO1,
+        FDCAN_INTERRUPT_LINE0);
+    if (hres != HAL_OK) { return -DC_HAL_ERROR_ISR_CONFIG; }
+*/
+
+    hres = HAL_FDCAN_ActivateNotification(
+        &hfdcan,
+        FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_RX_FIFO1_NEW_MESSAGE,
+        //FDCAN_IT_LIST_RX_FIFO0 | FDCAN_IT_LIST_RX_FIFO1,
+        0);
+    if (hres != HAL_OK) { return -DC_HAL_ERROR_ISR_CONFIG; }
+
+    NVIC_SetPriority(FDCAN1_IT0_IRQn, DRONECAN_IRQ_PRIORITY);
+    NVIC_EnableIRQ(FDCAN1_IT0_IRQn);
+
+    return 0;
+}
+
+
+int16_t dc_hal_receive(CanardCANFrame* const frame)
+{
+    if (frame == NULL) {
+        return -DC_HAL_ERROR_INVALID_ARGUMENT;
+    }
+
+    _process_error_status();
+
+    if (dronecan_rxwritepos == dronecan_rxreadpos) return 0; // fifo empty
+
+    uint16_t rxreadpos = (dronecan_rxreadpos + 1) & DRONECAN_RXFRAMEBUFSIZEMASK;
+    dronecan_rxreadpos = rxreadpos;
+    memcpy(frame, (uint8_t*)&(dronecan_rxbuf[rxreadpos]), sizeof(CanardCANFrame));
+
+    return 1;
+}
+
+
+#endif // DRONECAN_USE_RX_ISR
+
 
 //-------------------------------------------------------
 // Filter
@@ -298,7 +500,14 @@ int16_t dc_hal_config_acceptance_filters(
     sFilterConfig.FilterID2 = 0;
 
     for (uint8_t n = 0; n < num_filter_configs; n++) {
-        sFilterConfig.FilterConfig = ((n & 0x01) == 0) ? FDCAN_FILTER_TO_RXFIFO0 : FDCAN_FILTER_TO_RXFIFO1;
+        if (filter_configs[n].rx_fifo == DC_HAL_RX_FIFO0) {
+            sFilterConfig.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+        } else
+        if (filter_configs[n].rx_fifo == DC_HAL_RX_FIFO1) {
+            sFilterConfig.FilterConfig = FDCAN_FILTER_TO_RXFIFO1;
+        } else {
+            sFilterConfig.FilterConfig = ((n & 0x01) == 0) ? FDCAN_FILTER_TO_RXFIFO0 : FDCAN_FILTER_TO_RXFIFO1;
+        }
         sFilterConfig.FilterIndex = n;
         sFilterConfig.FilterID1 = (filter_configs[n].id & CANARD_CAN_EXT_ID_MASK);
         sFilterConfig.FilterID2 = (filter_configs[n].mask & CANARD_CAN_EXT_ID_MASK);
@@ -334,12 +543,17 @@ tDcHalStatistics dc_hal_get_stats(void)
 
 int16_t dc_hal_compute_timings(
     const uint32_t peripheral_clock_rate,
-    const uint32_t target_bitrate,
+    const uint32_t target_bit_rate,
     tDcHalCanTimings* const timings)
 {
-    if (target_bitrate != 1000000) {
+    if (target_bit_rate != 1000000) {
         return -DC_HAL_ERROR_UNSUPPORTED_BIT_RATE;
     }
+
+    // general rule:
+    // tq = peripheral_clock_rate / bit_rate
+    // BS1 = SP * tq - 1, where SP is e.g. 3/4 = 75% or 7/8 = 87.5%
+    // BS2 = tq - 1 - BS1 = (1 - SP) * tq
 
     // timings generated by phryniszak for 75%
 #if 1
@@ -358,6 +572,17 @@ int16_t dc_hal_compute_timings(
         timings->bit_segment_1 = 59;
         timings->bit_segment_2 = 20;
         timings->sync_jump_width = 20;
+    } else {
+        return -DC_HAL_ERROR_UNSUPPORTED_CLOCK_FREQUENCY;
+    }
+#endif
+    // timings generated by phryniszak for 87.5%
+#if 0
+    if (peripheral_clock_rate == 170000000) { // 170 MHz
+        timings->bit_rate_prescaler = 1;
+        timings->bit_segment_1 = 147;
+        timings->bit_segment_2 = 22;
+        timings->sync_jump_width = 21;
     } else {
         return -DC_HAL_ERROR_UNSUPPORTED_CLOCK_FREQUENCY;
     }
@@ -404,7 +629,7 @@ int16_t dc_hal_compute_timings(
     return ACANFD_STM32_Settings(
         peripheral_clock_rate,
         timings,
-        target_bitrate, 75,  1, 75,   50);
+        target_bit_rate, 75,  1, 75,   50);
         // ppm = 500: 5, 24, 9, 9
         // ppm = 100: 5, 24, 9, 9
         // ppm =  50: 5, 24, 9, 9

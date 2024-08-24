@@ -129,6 +129,8 @@ tRxSxSerial sx_serial;
 
 #include "dronecan_interface_rx.h"
 
+tRxDroneCan dronecan;
+
 
 //-------------------------------------------------------
 // Init

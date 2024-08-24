@@ -16,6 +16,11 @@
 
 #include "libcanard/canard.h"
 
+// library configuration
+#define DRONECAN_USE_RX_ISR
+#define DRONECAN_RXFRAMEBUFSIZE   64 // actual size is RXFRAMEBUFSIZE * sizeof(CanardCANFrame)
+#define DRONECAN_IRQ_PRIORITY     14
+
 
 #ifdef __cplusplus
 extern "C"
@@ -38,6 +43,8 @@ typedef enum
 
     DC_HAL_ERROR_UNSUPPORTED_CLOCK_FREQUENCY  = 3000,
     DC_HAL_ERROR_TIMING                       = 3001,
+
+    DC_HAL_ERROR_ISR_CONFIG                   = 4000,
 } DC_HAL_ERROR_ENUM;
 
 
@@ -56,10 +63,19 @@ typedef struct
 } tDcHalStatistics;
 
 
+typedef enum
+{
+    DC_HAL_RX_FIFO_DEFAULT = 0,
+    DC_HAL_RX_FIFO0,
+    DC_HAL_RX_FIFO1,
+} DC_HAL_RX_FIFO_ENUM;
+
+
 typedef struct
 {
     uint32_t id;
     uint32_t mask;
+    uint8_t rx_fifo; // can be DC_HAL_RX_FIFO
 } tDcHalAcceptanceFilterConfiguration;
 
 
@@ -98,6 +114,11 @@ int16_t dc_hal_compute_timings(
     const uint32_t peripheral_clock_rate,
     const uint32_t target_bitrate,
     tDcHalCanTimings* const timings);
+
+
+#ifdef DRONECAN_USE_RX_ISR
+int16_t dc_hal_enable_isr(void);
+#endif
 
 
 #ifdef __cplusplus

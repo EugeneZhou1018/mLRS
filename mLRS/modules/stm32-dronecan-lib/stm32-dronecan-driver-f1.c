@@ -272,7 +272,14 @@ int16_t dc_hal_config_acceptance_filters(
     sFilterConfig.SlaveStartFilterBank = 0; // for single CAN instances, this parameter is meaningless
 
     for (uint8_t n = 0; n < num_filter_configs; n++) {
-        sFilterConfig.FilterFIFOAssignment = ((n & 0x01) == 0) ? CAN_FILTER_FIFO0 : CAN_FILTER_FIFO1;
+        if (filter_configs[n].rx_fifo == DC_HAL_RX_FIFO0) {
+            sFilterConfig.FilterFIFOAssignment = CAN_FILTER_FIFO0;
+        } else
+        if (filter_configs[n].rx_fifo == DC_HAL_RX_FIFO1) {
+            sFilterConfig.FilterFIFOAssignment = CAN_FILTER_FIFO1;
+        } else {
+            sFilterConfig.FilterFIFOAssignment = ((n & 0x01) == 0) ? CAN_FILTER_FIFO0 : CAN_FILTER_FIFO1;
+        }
         sFilterConfig.FilterBank = n;
 
         // in the STM32F103 the CAN id's are store left aligned

@@ -12,19 +12,18 @@
 
 //#define NOT_DO_NODE_INFO
 
-#ifdef DEVICE_HAS_DRONECAN
+
+#include "dronecan_types_rx.h"
+
+#if defined DEVICE_HAS_DRONECAN || defined DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+
+extern tRxDroneCan dronecan;
 
 extern uint16_t micros16(void);
 extern volatile uint32_t millis32(void);
 extern bool connected(void);
 extern tStats stats;
-
-#include "../../../modules/stm32-dronecan-lib/stm32-dronecan-driver.h"
-#include "../../../modules/stm32-dronecan-lib/stm32-dronecan-protocol.h"
-#include "../Common/dronecan/out/include/uavcan.protocol.NodeStatus.h"
-#include "../Common/dronecan/out/include/uavcan.protocol.GetNodeInfo.h"
-#include "../Common/dronecan/out/include/dronecan.sensors.rc.RCInput.h"
-#include "../Common/dronecan/out/include/uavcan.protocol.dynamic_node_id.Allocation.h"
+extern tGlobalConfig Config;
 
 #ifndef DRONECAN_PREFERRED_NODE_ID
 #define DRONECAN_PREFERRED_NODE_ID  68
@@ -77,13 +76,17 @@ void dronecan_uid(uint8_t uid[DC_UNIQUE_ID_LEN])
 }
 
 
-uint16_t get_random16(void)
+// that's the same as used in fhss lib, is Microsoft Visual/Quick C/C++'s
+uint16_t dronecan_prng(void)
 {
-    static uint32_t m_z = 1234;
-    static uint32_t m_w = 76542;
-    m_z = 36969 * (m_z & 0xFFFFu) + (m_z >> 16);
-    m_w = 18000 * (m_w & 0xFFFFu) + (m_w >> 16);
-    return ((m_z << 16) + m_w) & 0xFFFF;
+    static uint32_t _seed = 1234;
+    const uint32_t a = 214013;
+    const uint32_t c = 2531011;
+    const uint32_t m = 2147483648;
+
+    _seed = (a * _seed + c) % m;
+
+    return _seed >> 16;
 }
 
 
@@ -140,53 +143,15 @@ void can_init(void);
 
 
 //-------------------------------------------------------
-// RxDroneCan class
+// RxDroneCan class implementation
 //-------------------------------------------------------
-
-class tRxDroneCan
-{
-  public:
-    void Init(void);
-    void Tick_ms(void);
-    void Do(void);
-    void SendRcData(tRcData* const rc_out, bool failsafe);
-
-    void send_node_status(void);
-    void handle_get_node_info_request(CanardInstance* const ins, CanardRxTransfer* const transfer);
-    void handle_dynamic_node_id_allocation_broadcast(CanardInstance* const ins, CanardRxTransfer* const transfer);
-    void send_dynamic_node_id_allocation_request(void);
-
-  private:
-    int16_t set_can_filters(void);
-
-    uint8_t node_status_transfer_id; // is this per message ? it reads so ...
-    uint8_t rc_input_transfer_id;
-    uint16_t tick_1Hz;
-
-    uint8_t node_id_allocation_transfer_id;
-    struct {
-        uint32_t send_next_request_at_ms;
-        uint32_t unique_id_offset;
-    } node_id_allocation;
-    bool node_id_allocation_running;
-
-    // to not burden the stack
-    union {
-        struct uavcan_protocol_NodeStatus node_status;
-        struct uavcan_protocol_GetNodeInfoResponse node_info_resp;
-        struct dronecan_sensors_rc_RCInput rc_input;
-    } _p;
-    uint8_t _buf[DRONECAN_BUF_SIZE];
-};
-
-tRxDroneCan dronecan;
-
 
 void tRxDroneCan::Init(void)
 {
     tick_1Hz = 0;
     node_status_transfer_id = 0;
     rc_input_transfer_id = 0;
+    rc_input_tlast_ms = 0;
     node_id_allocation_transfer_id = 0;
     node_id_allocation = {};
     node_id_allocation_running = false;
@@ -211,6 +176,13 @@ void tRxDroneCan::Init(void)
         dbg.puts("\nERROR: filter config failed");
     }
 
+#ifdef DRONECAN_USE_RX_ISR
+    res = dc_hal_enable_isr();
+    if (res < 0) {
+        dbg.puts("\nERROR: can isr config failed");
+    }
+#endif
+
     res = dc_hal_start();
     if (res < 0) {
         dbg.puts("\nERROR: can start failed");
@@ -226,21 +198,20 @@ tDcHalAcceptanceFilterConfiguration filter_configs[2];
 uint8_t filter_num = 0;
 
     if (canardGetLocalNodeID(&canard) == CANARD_BROADCAST_NODE_ID) {
-        // initialize filters as appropriate for startup, only accept
+        // initialize filters as needed for node id allocation at startup, only accept
         // - DYNAMIC_NODE_ID_ALLOCATION broadcasts
+        filter_configs[0].rx_fifo = DC_HAL_RX_FIFO0;
         filter_configs[0].id =
             DC_MESSAGE_TYPE_TO_CAN_ID(UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID) |
             DC_SERVICE_NOT_MESSAGE_TO_CAN_ID(0x00);
         filter_configs[0].mask =
             DC_MESSAGE_TYPE_MASK | DC_SERVICE_NOT_MESSAGE_MASK;
-            //~(DC_PRIORITY_MASK | DC_SOURCE_ID_MASK);
-
         filter_num = 1;
 
     } else {
         // set reduced filters, only accept
         // - GETNODEINFO requests
-        // - TUNNEL_TARGETTED broadcasts
+        filter_configs[0].rx_fifo = DC_HAL_RX_FIFO0;
         filter_configs[0].id =
             DC_SERVICE_TYPE_TO_CAN_ID(UAVCAN_PROTOCOL_GETNODEINFO_REQUEST_ID) |
             DC_REQUEST_NOT_RESPONSE_TO_CAN_ID(0x01) |
@@ -248,8 +219,6 @@ uint8_t filter_num = 0;
             DC_SERVICE_NOT_MESSAGE_TO_CAN_ID(0x01);
         filter_configs[0].mask =
             DC_SERVICE_TYPE_MASK | DC_REQUEST_NOT_RESPONSE_MASK | DC_DESTINATION_ID_MASK | DC_SERVICE_NOT_MESSAGE_MASK;
-            //~(DC_PRIORITY_MASK | DC_SOURCE_ID_MASK);
-
         filter_num = 1;
     }
 
@@ -282,6 +251,7 @@ void tRxDroneCan::Tick_ms(void)
     if (node_id_allocation_running) {
         node_id_allocation_running = false;
         set_can_filters();
+        return;
     }
 
     DECc(tick_1Hz, SYSTICK_DELAY_MS(1000));
@@ -304,6 +274,12 @@ void tRxDroneCan::Do(void)
 
 void tRxDroneCan::SendRcData(tRcData* rc_out, bool failsafe)
 {
+    if (canardGetLocalNodeID(&canard) == CANARD_BROADCAST_NODE_ID) return;
+
+    uint32_t tnow_ms = millis32();
+    if ((tnow_ms - rc_input_tlast_ms) < 19) return; // don't send too fast, DroneCAN is not for racing ...
+    rc_input_tlast_ms = tnow_ms;
+
     uint8_t failsafe_mode = Setup.Rx.FailsafeMode;
     if (failsafe) {
         switch (failsafe_mode) {
@@ -433,6 +409,11 @@ void tRxDroneCan::handle_get_node_info_request(CanardInstance* const ins, Canard
 }
 
 
+// The following two functions for dynamic node id allocation VERY closely follow an example source which
+// was provided by the UAVACN and libcanard projects in around 2017. The original sources seem to not be
+// available anymore. The licence was almost surely  permissive (MIT?) and the author Pavel Kirienko. We
+// apologize for not giving more appropriate credit.
+
 // Handle a dynamic node allocation message
 void tRxDroneCan::handle_dynamic_node_id_allocation_broadcast(CanardInstance* const ins, CanardRxTransfer* const transfer)
 {
@@ -442,7 +423,7 @@ void tRxDroneCan::handle_dynamic_node_id_allocation_broadcast(CanardInstance* co
     // Rule C - updating the randomized time interval
     node_id_allocation.send_next_request_at_ms =
         millis32() + UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_MIN_REQUEST_PERIOD_MS +
-        (get_random16() % UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_MAX_FOLLOWUP_DELAY_MS);
+        (dronecan_prng() % UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_MAX_FOLLOWUP_DELAY_MS);
 
     if (transfer->source_node_id == CANARD_BROADCAST_NODE_ID) {
         node_id_allocation.unique_id_offset = 0;
@@ -475,12 +456,13 @@ void tRxDroneCan::handle_dynamic_node_id_allocation_broadcast(CanardInstance* co
     }
 }
 
-// request a dynamic node allocation
+
+// Request a dynamic node allocation
 void tRxDroneCan::send_dynamic_node_id_allocation_request(void)
 {
     node_id_allocation.send_next_request_at_ms =
         millis32() + UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_MIN_REQUEST_PERIOD_MS +
-        (get_random16() % UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_MAX_FOLLOWUP_DELAY_MS);
+        (dronecan_prng() % UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_MAX_FOLLOWUP_DELAY_MS);
 
     // Structure of the request is documented in the DSDL definition
     // See http://uavcan.org/Specification/6._Application_level_functions/#dynamic-node-id-allocation
@@ -539,6 +521,7 @@ return false;
     if (transfer_type == CanardTransferTypeRequest) {
         switch (data_type_id) {
             case UAVCAN_PROTOCOL_GETNODEINFO_ID:
+                if (canardGetLocalNodeID(&canard) == CANARD_BROADCAST_NODE_ID) return false;
                 *out_data_type_signature = UAVCAN_PROTOCOL_GETNODEINFO_REQUEST_SIGNATURE;
                 return true;
         }
@@ -547,9 +530,7 @@ return false;
     if (transfer_type == CanardTransferTypeBroadcast) {
         switch (data_type_id) {
             case UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID:
-                if (canardGetLocalNodeID(&canard) != CANARD_BROADCAST_NODE_ID) {
-                    return false; // we are done with our node id allocation already
-                }
+                if (canardGetLocalNodeID(&canard) != CANARD_BROADCAST_NODE_ID) return false; // we are done with node id allocation already
                 *out_data_type_signature = UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_SIGNATURE;
                 return true;
         }
@@ -576,9 +557,6 @@ return;
     if (transfer->transfer_type == CanardTransferTypeBroadcast) {
         switch (transfer->data_type_id) {
             case UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID:
-                if (canardGetLocalNodeID(&canard) != CANARD_BROADCAST_NODE_ID) {
-                    return; // we are done with our node id allocation already
-                }
                 dronecan.handle_dynamic_node_id_allocation_broadcast(ins, transfer);
                 return;
         }
@@ -729,20 +707,7 @@ STATIC_ASSERT(DRONECAN_BUF_SIZE >= UAVCAN_PROTOCOL_NODESTATUS_MAX_SIZE, "DRONECA
 STATIC_ASSERT(DRONECAN_BUF_SIZE >= UAVCAN_PROTOCOL_GETNODEINFO_RESPONSE_MAX_SIZE, "DRONECAN_BUF_SIZE too small")
 STATIC_ASSERT(DRONECAN_BUF_SIZE >= DRONECAN_SENSORS_RC_RCINPUT_MAX_SIZE, "DRONECAN_BUF_SIZE too small")
 
-#else
-
-class tRxDroneCan
-{
-  public:
-    void Init(void) {}
-    void Tick_ms(void) {}
-    void Do(void) {}
-    void SendRcData(tRcData* const rc_out, bool failsafe) {}
-};
-
-tRxDroneCan dronecan;
 
 #endif // DEVICE_HAS_DRONECAN
-
 
 #endif // DRONECAN_INTERFACE_RX_H
