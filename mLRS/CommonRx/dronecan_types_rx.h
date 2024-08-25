@@ -44,6 +44,15 @@ class tRxDroneCan
     void handle_dynamic_node_id_allocation_broadcast(CanardInstance* const ins, CanardRxTransfer* const transfer);
     void send_dynamic_node_id_allocation_request(void);
 
+#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+    void putbuf(uint8_t* const buf, uint16_t len);
+    bool available(void);
+    uint8_t getc(void);
+    void flush(void);
+    void handle_tunnel_targetted_broadcast(CanardInstance* const ins, CanardRxTransfer* const transfer);
+    void send_tunnel_targetted(void);
+#endif
+
   private:
     int16_t set_can_filters(void);
 
@@ -60,6 +69,18 @@ class tRxDroneCan
         uint32_t unique_id_offset;
     } node_id_allocation;
     bool node_id_allocation_running;
+
+    uint8_t tunnel_targetted_transfer_id;
+    struct {
+        uint32_t to_fc_tlast_ms;
+        uint8_t server_node_id;
+    } tunnel_targetted;
+#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+    tFifo<uint8_t,RX_SERIAL_RXBUFSIZE> fifo_fc_to_ser;
+    tFifo<uint8_t,TX_SERIAL_TXBUFSIZE> fifo_ser_to_fc;
+    uint32_t tunnel_targetted_fc_to_ser_rate;
+    uint32_t tunnel_targetted_ser_to_fc_rate;
+#endif
 
     // to not burden the stack
     union {

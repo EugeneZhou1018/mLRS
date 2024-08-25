@@ -364,13 +364,11 @@ void FDCAN1_IT0_IRQHandler(void)
 
     uint32_t RxFifo0ITs = hfdcan.Instance->IR & (FDCAN_IR_RF0L | FDCAN_IR_RF0F | FDCAN_IR_RF0N); // __HAL_FDCAN_GET_FLAG()
     RxFifo0ITs &= hfdcan.Instance->IE; // __HAL_FDCAN_GET_IT_SOURCE()
-    uint32_t RxFifo1ITs = hfdcan.Instance->IR & (FDCAN_IR_RF1L | FDCAN_IR_RF1F | FDCAN_IR_RF1N);
-    RxFifo1ITs &= hfdcan.Instance->IE;
 
     if (RxFifo0ITs != 0U) {
         __HAL_FDCAN_CLEAR_FLAG(&hfdcan, RxFifo0ITs); // clear Rx FIFO0 flags
 
-        if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != 0) {
+        if ((RxFifo0ITs & FDCAN_FLAG_RX_FIFO0_NEW_MESSAGE) != 0) {
             FDCAN_RxHeaderTypeDef RxHeader;
             uint8_t data[64];
             if (HAL_FDCAN_GetRxMessage(&hfdcan, FDCAN_RX_FIFO0, &RxHeader, data) == HAL_OK) {
@@ -378,19 +376,42 @@ void FDCAN1_IT0_IRQHandler(void)
             }
         }
 
-        if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_MESSAGE_LOST) != 0) {
+        if ((RxFifo0ITs & FDCAN_FLAG_RX_FIFO0_MESSAGE_LOST) != 0) {
             dc_hal_stats.error_count++;
         }
-        if ((RxFifo0ITs & FDCAN_IT_RX_FIFO0_FULL) != 0) {
+        if ((RxFifo0ITs & FDCAN_FLAG_RX_FIFO0_FULL) != 0) {
             dc_hal_stats.rx_overflow_count++;
             dc_hal_stats.error_count++;
         }
     }
 
+    #define FDCAN_ERROR_MASK (FDCAN_IR_ELO | FDCAN_IR_WDI | FDCAN_IR_PEA | FDCAN_IR_PED | FDCAN_IR_ARA)
+    #define FDCAN_ERROR_STATUS_MASK (FDCAN_IR_EP | FDCAN_IR_EW | FDCAN_IR_BO)
+
+    uint32_t Errors = hfdcan.Instance->IR & FDCAN_ERROR_MASK;
+    Errors &= hfdcan.Instance->IE;
+    uint32_t ErrorStatusITs = hfdcan.Instance->IR & FDCAN_ERROR_STATUS_MASK;
+    ErrorStatusITs &= hfdcan.Instance->IE;
+
+    if (Errors != 0) {
+        __HAL_FDCAN_CLEAR_FLAG(&hfdcan, Errors); // clear the Error flags
+        dc_hal_stats.error_count++;
+    }
+    if (ErrorStatusITs != 0) {
+        __HAL_FDCAN_CLEAR_FLAG(&hfdcan, ErrorStatusITs); // clear the Error flags
+        dc_hal_stats.error_count++;
+    }
+}
+
+void FDCAN1_IT1_IRQHandler(void)
+{
+    uint32_t RxFifo1ITs = hfdcan.Instance->IR & (FDCAN_IR_RF1L | FDCAN_IR_RF1F | FDCAN_IR_RF1N);
+    RxFifo1ITs &= hfdcan.Instance->IE;
+
     if (RxFifo1ITs != 0U) {
         __HAL_FDCAN_CLEAR_FLAG(&hfdcan, RxFifo1ITs); // clear Rx FIFO1 flags
 
-        if ((RxFifo1ITs & FDCAN_IT_RX_FIFO1_NEW_MESSAGE) != 0) {
+        if ((RxFifo1ITs & FDCAN_FLAG_RX_FIFO1_NEW_MESSAGE) != 0) {
             FDCAN_RxHeaderTypeDef RxHeader;
             uint8_t data[64];
             if (HAL_FDCAN_GetRxMessage(&hfdcan, FDCAN_RX_FIFO1, &RxHeader, data) == HAL_OK) {
@@ -398,10 +419,10 @@ void FDCAN1_IT0_IRQHandler(void)
             }
         }
 
-        if ((RxFifo1ITs & FDCAN_IT_RX_FIFO1_MESSAGE_LOST) != 0) {
+        if ((RxFifo1ITs & FDCAN_FLAG_RX_FIFO1_MESSAGE_LOST) != 0) {
             dc_hal_stats.error_count++;
         }
-        if ((RxFifo1ITs & FDCAN_IT_RX_FIFO1_FULL) != 0) {
+        if ((RxFifo1ITs & FDCAN_FLAG_RX_FIFO1_FULL) != 0) {
             dc_hal_stats.rx_overflow_count++;
             dc_hal_stats.error_count++;
         }
@@ -442,6 +463,10 @@ HAL_StatusTypeDef hres;
         FDCAN_INTERRUPT_LINE0);
     if (hres != HAL_OK) { return -DC_HAL_ERROR_ISR_CONFIG; }
 */
+    hres = HAL_FDCAN_ConfigInterruptLines(&hfdcan, FDCAN_IT_GROUP_RX_FIFO0, FDCAN_INTERRUPT_LINE0);
+    if (hres != HAL_OK) { return -DC_HAL_ERROR_ISR_CONFIG; }
+    hres = HAL_FDCAN_ConfigInterruptLines(&hfdcan, FDCAN_IT_GROUP_RX_FIFO1, FDCAN_INTERRUPT_LINE1);
+    if (hres != HAL_OK) { return -DC_HAL_ERROR_ISR_CONFIG; }
 
     hres = HAL_FDCAN_ActivateNotification(
         &hfdcan,
@@ -451,7 +476,9 @@ HAL_StatusTypeDef hres;
     if (hres != HAL_OK) { return -DC_HAL_ERROR_ISR_CONFIG; }
 
     NVIC_SetPriority(FDCAN1_IT0_IRQn, DRONECAN_IRQ_PRIORITY);
+    NVIC_SetPriority(FDCAN1_IT1_IRQn, DRONECAN_IRQ_PRIORITY);
     NVIC_EnableIRQ(FDCAN1_IT0_IRQn);
+    NVIC_EnableIRQ(FDCAN1_IT1_IRQn);
 
     return 0;
 }
@@ -680,7 +707,10 @@ https://github.com/am32-firmware/AM32/pull/36/files
 
 https://github.com/ARMmbed/mbed-os/pull/13565/files
 */
-
+/*
+good source on CAN errors
+https://www.csselectronics.com/pages/can-bus-errors-intro-tutorial
+*/
 
 #endif // HAL_PCD_MODULE_ENABLED
 #endif // STM32G4

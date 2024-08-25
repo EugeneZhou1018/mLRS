@@ -47,6 +47,11 @@
 
 
 // is always uartb (or usb)
+#if defined DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN && defined DEVICE_IS_RECEIVER
+#include "../CommonRx/dronecan_types_rx.h"
+extern tRxDroneCan dronecan;
+#endif
+
 class tSerialPort : public tSerialBase
 {
 #ifdef USE_SERIAL
@@ -69,6 +74,12 @@ class tSerialPort : public tSerialBase
     uint16_t bytes_available(void) override { IFNSER(0); return uartb_rx_bytesavailable(); }
     bool has_systemboot(void) override { return uartb_has_systemboot(); }
 #endif
+#elif defined DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN && defined DEVICE_IS_RECEIVER
+  public:
+    void putbuf(uint8_t* buf, uint16_t len) override { dronecan.putbuf(buf, len); }
+    bool available(void) override { return dronecan.available(); }
+    char getc(void) override { return dronecan.getc(); }
+    void flush(void) override { dronecan.flush(); }
 #endif
 };
 

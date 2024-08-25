@@ -79,10 +79,10 @@ void dronecan_uid(uint8_t uid[DC_UNIQUE_ID_LEN])
 // that's the same as used in fhss lib, is Microsoft Visual/Quick C/C++'s
 uint16_t dronecan_prng(void)
 {
-    static uint32_t _seed = 1234;
-    const uint32_t a = 214013;
-    const uint32_t c = 2531011;
-    const uint32_t m = 2147483648;
+static uint32_t _seed = 1234;
+const uint32_t a = 214013;
+const uint32_t c = 2531011;
+const uint32_t m = 2147483648;
 
     _seed = (a * _seed + c) % m;
 
@@ -101,7 +101,7 @@ CanardCANFrame frame;
             dbg.puts("\nERR: rec ");dbg.puts(s16toBCD_s(res));
         }
         if (res <= 0) break; // no receive or error
-dbg.puts("\nrx ");dbg.puts(u32toHEX_s(frame.id & CANARD_CAN_EXT_ID_MASK));
+//dbg.puts("\nrx ");dbg.puts(u32toHEX_s(frame.id & CANARD_CAN_EXT_ID_MASK));
 //dbg.puts("\nrx");
         res = canardHandleRxFrame(&canard, &frame, micros64()); // 0: ok, <0: error
     }
@@ -155,6 +155,15 @@ void tRxDroneCan::Init(void)
     node_id_allocation_transfer_id = 0;
     node_id_allocation = {};
     node_id_allocation_running = false;
+    tunnel_targetted_transfer_id = 0;
+    tunnel_targetted.to_fc_tlast_ms = 0;
+    tunnel_targetted.server_node_id = 0;
+#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+    fifo_fc_to_ser.Flush();
+    fifo_ser_to_fc.Flush();
+    tunnel_targetted_fc_to_ser_rate = 0;
+    tunnel_targetted_ser_to_fc_rate = 0;
+#endif
 
     dbg.puts("\n\n\nCAN init");
 
@@ -170,6 +179,11 @@ void tRxDroneCan::Init(void)
 
     // canardSetLocalNodeID(&canard, DRONECAN_PREFERRED_NODE_ID);
     node_id_allocation_running = true;
+#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+    // ArduPilot's MAVLink via CAN seems to need a fixed node id
+    canardSetLocalNodeID(&canard, DRONECAN_PREFERRED_NODE_ID);
+    node_id_allocation_running = false;
+#endif
 
     int16_t res = set_can_filters();
     if (res < 0) {
@@ -211,6 +225,7 @@ uint8_t filter_num = 0;
     } else {
         // set reduced filters, only accept
         // - GETNODEINFO requests
+        // - TUNNEL_TARGETTED broadcasts
         filter_configs[0].rx_fifo = DC_HAL_RX_FIFO0;
         filter_configs[0].id =
             DC_SERVICE_TYPE_TO_CAN_ID(UAVCAN_PROTOCOL_GETNODEINFO_REQUEST_ID) |
@@ -220,6 +235,15 @@ uint8_t filter_num = 0;
         filter_configs[0].mask =
             DC_SERVICE_TYPE_MASK | DC_REQUEST_NOT_RESPONSE_MASK | DC_DESTINATION_ID_MASK | DC_SERVICE_NOT_MESSAGE_MASK;
         filter_num = 1;
+#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+        filter_configs[0].rx_fifo = DC_HAL_RX_FIFO1;
+        filter_configs[1].id =
+            DC_MESSAGE_TYPE_TO_CAN_ID(UAVCAN_TUNNEL_TARGETTED_ID) |
+            DC_SERVICE_NOT_MESSAGE_TO_CAN_ID(0x00);
+        filter_configs[1].mask =
+            DC_MESSAGE_TYPE_MASK | DC_SERVICE_NOT_MESSAGE_MASK;
+        filter_num = 2;
+#endif
     }
 
     dbg.puts("\nFilter");
@@ -254,6 +278,15 @@ void tRxDroneCan::Tick_ms(void)
         return;
     }
 
+#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+    uint32_t tnow_ms = millis32();
+    if (tunnel_targetted.server_node_id &&
+        (fifo_ser_to_fc.Available() > 0 || ((tnow_ms - tunnel_targetted.to_fc_tlast_ms) > 500))) {
+        tunnel_targetted.to_fc_tlast_ms = tnow_ms;
+        send_tunnel_targetted();
+    }
+#endif
+
     DECc(tick_1Hz, SYSTICK_DELAY_MS(1000));
     if (!tick_1Hz) {
         // purge transfers that are no longer transmitted. This can free up some memory
@@ -261,6 +294,15 @@ void tRxDroneCan::Tick_ms(void)
 
         // emit node status message
         send_node_status();
+
+#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+dbg.puts("\n fc->ser:   ");dbg.puts(u16toBCD_s(tunnel_targetted_fc_to_ser_rate));
+dbg.puts("\n ser->fc:   ");dbg.puts(u16toBCD_s(tunnel_targetted_ser_to_fc_rate));
+tunnel_targetted_fc_to_ser_rate = 0;
+tunnel_targetted_ser_to_fc_rate = 0;
+dbg.puts("\n   err ov,cnt: ");dbg.puts(u16toBCD_s(dc_hal_get_stats().rx_overflow_count));
+dbg.puts(" , ");dbg.puts(u16toBCD_s(dc_hal_get_stats().error_count));
+#endif
     }
 }
 
@@ -324,6 +366,40 @@ void tRxDroneCan::SendRcData(tRcData* rc_out, bool failsafe)
         _buf,
         len);
 }
+
+
+//-------------------------------------------------------
+// serial interface
+//-------------------------------------------------------
+
+#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+void tRxDroneCan::putbuf(uint8_t* const buf, uint16_t len)
+{
+    fifo_ser_to_fc.PutBuf(buf, len);
+    tunnel_targetted_ser_to_fc_rate += len;
+}
+
+
+bool tRxDroneCan::available(void)
+{
+    return (fifo_fc_to_ser.Available() > 0);
+    return false;
+}
+
+
+uint8_t tRxDroneCan::getc(void)
+{
+    return fifo_fc_to_ser.Get();
+    return 0;
+}
+
+
+void tRxDroneCan::flush(void)
+{
+    fifo_fc_to_ser.Flush();
+    fifo_ser_to_fc.Flush();
+}
+#endif
 
 
 //-------------------------------------------------------
@@ -497,6 +573,63 @@ void tRxDroneCan::send_dynamic_node_id_allocation_request(void)
 }
 
 
+#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+// Handle a tunnel.Targetted message, check if it's for us and proper
+void tRxDroneCan::handle_tunnel_targetted_broadcast(CanardInstance* const ins, CanardRxTransfer* const transfer)
+{
+    if (uavcan_tunnel_Targetted_decode(transfer, &_p.tunnel_targetted)) {
+        return; // something went wrong
+    }
+
+    // must be targeted at us
+    if (_p.tunnel_targetted.target_node != canardGetLocalNodeID(&canard)) return;
+
+    // ArduPilot unfortunately does not set this correctly, so can't check
+    //if (_p.tunnel_targetted.protocol.protocol != UAVCAN_TUNNEL_PROTOCOL_MAVLINK2) return;
+
+    // serial_id must be set to 0
+    // TODO: should we just store it and reuse when sending?
+    if (_p.tunnel_targetted.serial_id != 0) return;
+
+    tunnel_targetted_fc_to_ser_rate += _p.tunnel_targetted.buffer.len;
+
+    // memorize the node_id of the sender, this is most likely our fc (hopefully true)
+    if (!tunnel_targetted.server_node_id) {
+        tunnel_targetted.server_node_id = transfer->source_node_id;
+    }
+
+    if (_p.tunnel_targetted.buffer.len == 0) return; // a short cut
+    fifo_fc_to_ser.PutBuf(_p.tunnel_targetted.buffer.data, _p.tunnel_targetted.buffer.len);
+}
+
+
+// Send a tunnel.Targetted message to the node which hopefully is the flight controller
+void tRxDroneCan::send_tunnel_targetted(void)
+{
+    _p.tunnel_targetted.target_node = 9; //tunnel_targetted.server_node_id;
+    _p.tunnel_targetted.protocol.protocol = UAVCAN_TUNNEL_PROTOCOL_MAVLINK2;
+    _p.tunnel_targetted.serial_id = 0;
+    _p.tunnel_targetted.options = UAVCAN_TUNNEL_TARGETTED_OPTION_LOCK_PORT;
+    _p.tunnel_targetted.baudrate = Config.SerialBaudrate; // this is ignored by ArduPilot (as it should)
+
+    uint16_t data_len = fifo_ser_to_fc.Available();
+    _p.tunnel_targetted.buffer.len = (data_len < 120) ? data_len : 120;
+    for (uint8_t n = 0; n < data_len; n++) _p.tunnel_targetted.buffer.data[n] = fifo_ser_to_fc.Get();
+
+    uint16_t len = uavcan_tunnel_Targetted_encode(&_p.tunnel_targetted, _buf);
+
+    canardBroadcast(
+        &canard,
+        UAVCAN_TUNNEL_TARGETTED_SIGNATURE,
+        UAVCAN_TUNNEL_TARGETTED_ID,
+        &tunnel_targetted_transfer_id,
+        CANARD_TRANSFER_PRIORITY_MEDIUM,
+        _buf,
+        len);
+}
+#endif
+
+
 //-------------------------------------------------------
 // DroneCAN/Libcanard call backs
 //-------------------------------------------------------
@@ -533,6 +666,12 @@ return false;
                 if (canardGetLocalNodeID(&canard) != CANARD_BROADCAST_NODE_ID) return false; // we are done with node id allocation already
                 *out_data_type_signature = UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_SIGNATURE;
                 return true;
+#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+            case UAVCAN_TUNNEL_TARGETTED_ID:
+                if (canardGetLocalNodeID(&canard) == CANARD_BROADCAST_NODE_ID) return false;
+                *out_data_type_signature = UAVCAN_TUNNEL_TARGETTED_SIGNATURE;
+                return true;
+#endif
         }
     }
     return false;
@@ -559,6 +698,11 @@ return;
             case UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID:
                 dronecan.handle_dynamic_node_id_allocation_broadcast(ins, transfer);
                 return;
+#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+            case UAVCAN_TUNNEL_TARGETTED_ID:
+                dronecan.handle_tunnel_targetted_broadcast(ins, transfer);
+                return;
+#endif
         }
     }
 }
@@ -706,6 +850,7 @@ void can_init(void)
 STATIC_ASSERT(DRONECAN_BUF_SIZE >= UAVCAN_PROTOCOL_NODESTATUS_MAX_SIZE, "DRONECAN_BUF_SIZE too small")
 STATIC_ASSERT(DRONECAN_BUF_SIZE >= UAVCAN_PROTOCOL_GETNODEINFO_RESPONSE_MAX_SIZE, "DRONECAN_BUF_SIZE too small")
 STATIC_ASSERT(DRONECAN_BUF_SIZE >= DRONECAN_SENSORS_RC_RCINPUT_MAX_SIZE, "DRONECAN_BUF_SIZE too small")
+STATIC_ASSERT(DRONECAN_BUF_SIZE >= UAVCAN_TUNNEL_TARGETTED_MAX_SIZE, "DRONECAN_BUF_SIZE too small")
 
 
 #endif // DEVICE_HAS_DRONECAN

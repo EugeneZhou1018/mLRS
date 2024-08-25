@@ -82,6 +82,7 @@ In rx-hal files:
 #define DEVICE_HAS_SINGLE_LED_RGB   // board has only one LED which is RGB WS2812
 #define DEVICE_HAS_FAN_ONOFF        // board has a Fan, which can be set on or off
 #define DEVICE_HAS_DRONECAN         // board has a DroneCAN port
+#define DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN // dito with using serial MAVLink over CAN
 
 Note: Some "high-level" features are set for each device in the device_conf.h file, and not in the device's hal file.
 */
@@ -268,7 +269,9 @@ Note: Some "high-level" features are set for each device in the device_conf.h fi
     #define USE_DEBUG
   #endif
 #else
-  #define USE_SERIAL
+  #if !defined DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN // we currently simply substitute a serial by the CAN port, no user choice yet
+    #define USE_SERIAL
+  #endif
   #if defined DEBUG_ENABLED && !defined DEVICE_HAS_NO_DEBUG
     #define USE_DEBUG
   #endif
