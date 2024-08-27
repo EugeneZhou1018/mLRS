@@ -10,7 +10,8 @@
 
  1. run git submodule update --init --recursive
  2. calls run_copy_st_drivers.py to populate the target ST Driver folders
- 3. calls fmav_generate_c_library.py to generated mavlink library files
+ 3. calls fmav_generate_c_library.py to generate MAVLink library files
+ 4. calls dronecan_generate_c_library.py to generate DroneCAN library files
 ********************************************************
 '''
 import os
@@ -55,10 +56,19 @@ def generate_mavlink_c_library():
     os_system(os.path.join('.','fmav_generate_c_library.py'))
     print('# DONE #')
 
+def generate_dronecan_c_library():
+    print('----------------------------------------')
+    print(' run dronecan_generate_c_library.py')
+    print('----------------------------------------')
+    os.chdir(os.path.join(mLRSdirectory,'Common','dronecan'))
+    os_system(os.path.join('.','dronecan_generate_c_library.py -np'))
+    print('# DONE #')
+
 
 git_submodules_update()
 copy_st_drivers()
 generate_mavlink_c_library()
+generate_dronecan_c_library()
 
 os.system("pause")
 

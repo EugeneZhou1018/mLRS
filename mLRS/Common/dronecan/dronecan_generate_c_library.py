@@ -6,6 +6,8 @@
  https://www.gnu.org/licenses/gpl-3.0.de.html
  OlliW @ www.olliw.eu
 *******************************************************
+ version 27.08.2024
+*******************************************************
 '''
 import os
 import shutil
@@ -135,11 +137,24 @@ def correct_dsdl():
             call_replace_c(os.path.join(outdir,'src'), file)
 
 
-kill_outdir()
-generate_dsdl()
-remove_dsdl()
-correct_dsdl()
+#-- here we go
+if __name__ == "__main__":
+    cmdline_nopause = False
 
-print('# DONE #')
-os.system("pause")
+    cmd_pos = -1
+    for cmd in sys.argv:
+        cmd_pos += 1
+        if cmd == '--nopause' or cmd == '-np':
+            cmdline_nopause = True
+
+
+    kill_outdir()
+    generate_dsdl()
+    remove_dsdl()
+    correct_dsdl()
+
+
+    print('Done')
+    if not cmdline_nopause:
+        os.system("pause")
 
