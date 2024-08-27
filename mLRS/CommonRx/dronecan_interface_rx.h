@@ -190,17 +190,17 @@ void tRxDroneCan::Init(void)
         dbg.puts("\nERROR: filter config failed");
     }
 
+    res = dc_hal_start();
+    if (res < 0) {
+        dbg.puts("\nERROR: can start failed");
+    }
+
 #ifdef DRONECAN_USE_RX_ISR
     res = dc_hal_enable_isr();
     if (res < 0) {
         dbg.puts("\nERROR: can isr config failed");
     }
 #endif
-
-    res = dc_hal_start();
-    if (res < 0) {
-        dbg.puts("\nERROR: can start failed");
-    }
 
     dbg.puts("\nCAN started");
 }
@@ -314,7 +314,7 @@ void tRxDroneCan::Do(void)
 }
 
 
-void tRxDroneCan::SendRcData(tRcData* rc_out, bool failsafe)
+void tRxDroneCan::SendRcData(tRcData* const rc_out, bool failsafe)
 {
     if (canardGetLocalNodeID(&canard) == CANARD_BROADCAST_NODE_ID) return;
 
