@@ -81,6 +81,7 @@ class tRxDroneCan
     tFifo<uint8_t,TX_SERIAL_TXBUFSIZE> fifo_ser_to_fc;
     uint32_t tunnel_targetted_fc_to_ser_rate;
     uint32_t tunnel_targetted_ser_to_fc_rate;
+    uint32_t fifo_fc_to_ser_tx_full_error_cnt;
 #endif
 
     // to not burden the stack

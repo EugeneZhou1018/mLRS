@@ -117,7 +117,7 @@ const CanardCANFrame* frame;
     while (1) {
         frame = canardPeekTxQueue(&canard);
         if (!frame) break; // no frame in tx queue
-        int16_t res = dc_hal_transmit(frame);
+        int16_t res = dc_hal_transmit(frame, millis32());
 //dbg.puts("\ntx ");dbg.puts(s16toBCD_s(res));
         if (res != 0) { // successfully submitted or error, so drop the frame
             canardPopTxQueue(&canard);
@@ -165,6 +165,7 @@ void tRxDroneCan::Init(void)
     fifo_ser_to_fc.Flush();
     tunnel_targetted_fc_to_ser_rate = 0;
     tunnel_targetted_ser_to_fc_rate = 0;
+    fifo_fc_to_ser_tx_full_error_cnt = 0;
 #endif
 
     dbg.puts("\n\n\nCAN init");
@@ -320,6 +321,7 @@ dbg.puts("\n fc->ser:   ");dbg.puts(u16toBCD_s(tunnel_targetted_fc_to_ser_rate))
 dbg.puts("\n ser->fc:   ");dbg.puts(u16toBCD_s(tunnel_targetted_ser_to_fc_rate));
 tunnel_targetted_fc_to_ser_rate = 0;
 tunnel_targetted_ser_to_fc_rate = 0;
+dbg.puts("\n   tx_fifo err: ");dbg.puts(u16toBCD_s(fifo_fc_to_ser_tx_full_error_cnt));
 dbg.puts("\n   err sum: ");dbg.puts(u16toBCD_s(dc_hal_get_stats().error_sum_count));
 #endif
     }
@@ -618,6 +620,11 @@ void tRxDroneCan::handle_tunnel_targetted_broadcast(CanardInstance* const ins, C
     }
 
     if (_p.tunnel_targetted.buffer.len == 0) return; // a short cut
+
+    if (fifo_fc_to_ser.IsFull() || !fifo_fc_to_ser.HasSpace(_p.tunnel_targetted.buffer.len)) {
+        fifo_fc_to_ser_tx_full_error_cnt++;
+    }
+
     fifo_fc_to_ser.PutBuf(_p.tunnel_targetted.buffer.data, _p.tunnel_targetted.buffer.len);
 }
 

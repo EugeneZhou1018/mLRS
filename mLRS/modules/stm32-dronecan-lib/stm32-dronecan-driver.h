@@ -59,20 +59,23 @@ typedef enum
 typedef struct
 {
     uint32_t bo_count; // bus off
-    uint32_t lec_count; // lec
+    uint32_t lec_count; // LEC
+    uint32_t pxd_count; // PXD
 #ifdef DRONECAN_USE_RX_ISR
     uint32_t rx_overflow_count; // rx fifo overflow
-    uint32_t isr_xtd_count;
-    uint32_t isr_rtr_count;
-    uint32_t isr_fdf_count;
-    uint32_t isr_brs_count;
-    uint32_t isr_dlc_count;
-    uint32_t isr_rf0l_count;
-    uint32_t isr_rf0f_count;
-    uint32_t isr_rf1l_count;
-    uint32_t isr_rf1f_count;
+    uint32_t isr_xtd_count; // XTD
+    uint32_t isr_rtr_count; // RTR
+    uint32_t isr_fdf_count; // FDF
+    uint32_t isr_brs_count; // BRS
+    uint32_t isr_dlc_count; // DLC
+    uint32_t isr_rf0f_count; // RF0F
+    uint32_t isr_rf0l_count; // RF0L
+    uint32_t isr_rf1f_count; // RF1F
+    uint32_t isr_rf1l_count; // RF1L
     uint32_t isr_errors_count;
     uint32_t isr_errorstatus_count;
+    uint32_t tffl_count; // TFFL
+    uint32_t tfqf_count; // TFQF
 #endif
     uint32_t error_sum_count;
 } tDcHalStatistics;
@@ -111,7 +114,7 @@ int16_t dc_hal_init(
 int16_t dc_hal_start(void);
 
 
-int16_t dc_hal_transmit(const CanardCANFrame* const frame);
+int16_t dc_hal_transmit(const CanardCANFrame* const frame, uint32_t tnow_ms);
 
 
 int16_t dc_hal_receive(CanardCANFrame* const frame);

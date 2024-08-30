@@ -75,6 +75,11 @@ static void _process_error_status(void)
             HAL_FDCAN_AbortTxRequest(&hfdcan, FDCAN_TX_BUFFER0 | FDCAN_TX_BUFFER1 | FDCAN_TX_BUFFER2);
         }
     }
+
+    if ((psr & FDCAN_PSR_PXE) != 0) { // protocol exception event occurred, happens when fc is not yet doing CAN
+        CLEAR_BIT(hfdcan.Instance->PSR, FDCAN_PSR_PXE);
+        // dc_hal_stats.pxd_count++; // un-comment only when needed for testing
+    }
 }
 
 
@@ -187,7 +192,7 @@ int16_t dc_hal_start(void)
 // Transmit
 //-------------------------------------------------------
 
-int16_t dc_hal_transmit(const CanardCANFrame* const frame)
+int16_t dc_hal_transmit(const CanardCANFrame* const frame, uint32_t tnow_ms)
 {
     if (frame == NULL) {
         return -DC_HAL_ERROR_INVALID_ARGUMENT;
@@ -209,14 +214,22 @@ int16_t dc_hal_transmit(const CanardCANFrame* const frame)
 
     _process_error_status();
 
+static uint32_t tx_tlast_ms = 0;
+
     // thx to the TxFiFo in the G4 we can do the crude method and just put the message into the fifo if there is space
     // check for space in fifo
     if (HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan) == 0) {
+        if (tx_tlast_ms > 0 && (tnow_ms - tx_tlast_ms) > 10) {
+            dc_hal_stats.tffl_count++;
+        }
         return 0; // no space, postpone
     }
     // this check is done in HAL_FDCAN_AddMessageToTxFifoQ(), so better do it here too
     if ((hfdcan.Instance->TXFQS & FDCAN_TXFQS_TFQF) != 0) {
-        return 0; // postpone
+        if (tx_tlast_ms > 0 && (tnow_ms - tx_tlast_ms) > 10) {
+            dc_hal_stats.tfqf_count++;
+        }
+        return 0; // Tx FIFO/Queue full, postpone
     }
 
     FDCAN_TxHeaderTypeDef pTxHeader;
@@ -234,6 +247,8 @@ int16_t dc_hal_transmit(const CanardCANFrame* const frame)
 
     HAL_StatusTypeDef hres = HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan, &pTxHeader, frame->data);
     if (hres != HAL_OK) { return -DC_HAL_ERROR_CAN_ADD_TX_MESSAGE; }
+
+tx_tlast_ms = tnow_ms;
 
     return 1;
 }
@@ -310,7 +325,7 @@ typedef struct
     uint32_t r1;
     union {
         uint8_t data[CANARD_CAN_FRAME_MAX_DATA_LEN];
-        uint32_t data_32[CANARD_CAN_FRAME_MAX_DATA_LEN / 4];
+        uint32_t data_32[CANARD_CAN_FRAME_MAX_DATA_LEN / 4]; // CANARD_CAN_FRAME_MAX_DATA_LEN should be devidable by 4
     };
 } tDcRxFifoElement;
 
@@ -495,7 +510,8 @@ HAL_StatusTypeDef hres;
         FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_RX_FIFO0_FULL |
         FDCAN_IT_RX_FIFO1_NEW_MESSAGE | FDCAN_IT_RX_FIFO1_FULL |
         FDCAN_IT_BUS_OFF,
-//        FDCAN_IT_LIST_RX_FIFO0 | FDCAN_IT_LIST_RX_FIFO1 | FDCAN_IT_BUS_OFF,
+//        FDCAN_IT_LIST_RX_FIFO0 | FDCAN_IT_LIST_RX_FIFO1 |
+//        FDCAN_IT_LIST_BIT_LINE_ERROR | FDCAN_IT_LIST_PROTOCOL_ERROR,
         0);
     if (hres != HAL_OK) { return -DC_HAL_ERROR_ISR_CONFIG; }
 
@@ -612,7 +628,7 @@ int16_t dc_hal_config_acceptance_filters(
 
 tDcHalStatistics dc_hal_get_stats(void)
 {
-    dc_hal_stats.error_sum_count = dc_hal_stats.bo_count + dc_hal_stats.lec_count;
+    dc_hal_stats.error_sum_count = dc_hal_stats.bo_count + dc_hal_stats.lec_count + dc_hal_stats.pxd_count;
 #ifdef DRONECAN_USE_RX_ISR
     dc_hal_stats.error_sum_count += dc_hal_stats.rx_overflow_count;
     dc_hal_stats.error_sum_count += dc_hal_stats.isr_xtd_count;
@@ -626,6 +642,8 @@ tDcHalStatistics dc_hal_get_stats(void)
     dc_hal_stats.error_sum_count += dc_hal_stats.isr_rf1f_count;
     dc_hal_stats.error_sum_count += dc_hal_stats.isr_errors_count;
     dc_hal_stats.error_sum_count += dc_hal_stats.isr_errorstatus_count;
+    dc_hal_stats.error_sum_count += dc_hal_stats.tffl_count;
+    dc_hal_stats.error_sum_count += dc_hal_stats.tfqf_count;
 #endif
     return dc_hal_stats;
 }
