@@ -213,7 +213,7 @@ void tRxDroneCan::Init(void)
 void tRxDroneCan::Start(void)
 {
 #ifdef DRONECAN_USE_RX_ISR
-    // HÄ?? it somehow does not work to call dc_hal_enable_isr() here ??
+    // Hum?? it somehow does not work to call dc_hal_enable_isr() here ??
     dc_hal_rx_flush();
 #endif
     dbg.puts("\nCAN started");
@@ -830,7 +830,7 @@ void can_init(void)
     if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK) {}
 */
 #ifdef USE_HAL_NOT_LL
-    __HAL_RCC_FDCAN_CONFIG(RCC_FDCANCLKSOURCE_PCLK1);
+    __HAL_RCC_FDCAN_CONFIG(RCC_FDCANCLKSOURCE_PCLK1); // RCC->CCIPR = (RCC->CCIPR & ~RCC_CCIPR_FDCANSEL) | RCC_CCIPR_FDCANSEL_1;
 
     __HAL_RCC_FDCAN_CLK_ENABLE(); // RCC->APB1ENR1  |= RCC_APB1ENR1_FDCANEN;
     //__HAL_RCC_FDCAN_FORCE_RESET(); // SET_BIT(RCC->APB1RSTR1, RCC_APB1RSTR1_FDCANRST) // RCC->APB1RSTR1 |= RCC_APB1RSTR1_FDCANRST;
