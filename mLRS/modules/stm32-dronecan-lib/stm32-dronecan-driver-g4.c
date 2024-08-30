@@ -116,7 +116,7 @@ int16_t dc_hal_init(
     hfdcan.Init.Mode = FDCAN_MODE_NORMAL;
 
     hfdcan.Init.AutoRetransmission = DISABLE;
-    hfdcan.Init.TransmitPause = DISABLE;
+    hfdcan.Init.TransmitPause = ENABLE; //DISABLE; // that's probably a good thing to enable it
     hfdcan.Init.ProtocolException = DISABLE;
 
     hfdcan.Init.NominalPrescaler = timings->bit_rate_prescaler;
