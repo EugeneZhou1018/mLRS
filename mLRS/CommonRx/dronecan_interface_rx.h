@@ -104,6 +104,7 @@ CanardCANFrame frame;
 //dbg.puts("\nrx ");dbg.puts(u32toHEX_s(frame.id & CANARD_CAN_EXT_ID_MASK));
 //dbg.puts("\nrx");
         res = canardHandleRxFrame(&canard, &frame, micros64()); // 0: ok, <0: error
+        return; // only do one
     }
 }
 
@@ -121,6 +122,7 @@ const CanardCANFrame* frame;
         if (res != 0) { // successfully submitted or error, so drop the frame
             canardPopTxQueue(&canard);
         }
+        return; // only do one
     }
 }
 
@@ -190,11 +192,7 @@ void tRxDroneCan::Init(void)
         dbg.puts("\nERROR: filter config failed");
     }
 
-    res = dc_hal_start();
-    if (res < 0) {
-        dbg.puts("\nERROR: can start failed");
-    }
-
+    // it appears to not matter if firs isr enable and then start, or vice versa
 #ifdef DRONECAN_USE_RX_ISR
     res = dc_hal_enable_isr();
     if (res < 0) {
@@ -202,6 +200,21 @@ void tRxDroneCan::Init(void)
     }
 #endif
 
+    res = dc_hal_start();
+    if (res < 0) {
+        dbg.puts("\nERROR: can start failed");
+    }
+
+    dbg.puts("\nCAN inited");
+}
+
+
+void tRxDroneCan::Start(void)
+{
+#ifdef DRONECAN_USE_RX_ISR
+    // HÄ?? it somehow does not work to call dc_hal_enable_isr() here ??
+    dc_hal_rx_flush();
+#endif
     dbg.puts("\nCAN started");
 }
 
@@ -280,10 +293,17 @@ void tRxDroneCan::Tick_ms(void)
 
 #ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
     uint32_t tnow_ms = millis32();
-    if (tunnel_targetted.server_node_id &&
-        (fifo_ser_to_fc.Available() > 0 || ((tnow_ms - tunnel_targetted.to_fc_tlast_ms) > 500))) {
+    if (tunnel_targetted.server_node_id) { // don't send before we haven't gotten a tunnel.Targetted from the fc
+        if (fifo_ser_to_fc.Available() > 0 || (tnow_ms - tunnel_targetted.to_fc_tlast_ms) > 500) {
+            tunnel_targetted.to_fc_tlast_ms = tnow_ms;
+            send_tunnel_targetted();
+        }
+    } else {
         tunnel_targetted.to_fc_tlast_ms = tnow_ms;
-        send_tunnel_targetted();
+        // this is important
+        // otherwise the fifo is pretty full and many CAN messages would be send, and the rx crashes
+        // behaving badly, ok, but why does it crash ??
+        fifo_ser_to_fc.Flush();
     }
 #endif
 
@@ -300,8 +320,7 @@ dbg.puts("\n fc->ser:   ");dbg.puts(u16toBCD_s(tunnel_targetted_fc_to_ser_rate))
 dbg.puts("\n ser->fc:   ");dbg.puts(u16toBCD_s(tunnel_targetted_ser_to_fc_rate));
 tunnel_targetted_fc_to_ser_rate = 0;
 tunnel_targetted_ser_to_fc_rate = 0;
-dbg.puts("\n   err ov,cnt: ");dbg.puts(u16toBCD_s(dc_hal_get_stats().rx_overflow_count));
-dbg.puts(" , ");dbg.puts(u16toBCD_s(dc_hal_get_stats().error_count));
+dbg.puts("\n   err sum: ");dbg.puts(u16toBCD_s(dc_hal_get_stats().error_sum_count));
 #endif
     }
 }
@@ -606,7 +625,7 @@ void tRxDroneCan::handle_tunnel_targetted_broadcast(CanardInstance* const ins, C
 // Send a tunnel.Targetted message to the node which hopefully is the flight controller
 void tRxDroneCan::send_tunnel_targetted(void)
 {
-    _p.tunnel_targetted.target_node = 9; //tunnel_targetted.server_node_id;
+    _p.tunnel_targetted.target_node = tunnel_targetted.server_node_id;
     _p.tunnel_targetted.protocol.protocol = UAVCAN_TUNNEL_PROTOCOL_MAVLINK2;
     _p.tunnel_targetted.serial_id = 0;
     _p.tunnel_targetted.options = UAVCAN_TUNNEL_TARGETTED_OPTION_LOCK_PORT;

@@ -35,6 +35,7 @@ class tRxDroneCan
 {
   public:
     void Init(void);
+    void Start(void); // do this as closely as possible before the loop
     void Tick_ms(void);
     void Do(void);
     void SendRcData(tRcData* const rc_out, bool failsafe);

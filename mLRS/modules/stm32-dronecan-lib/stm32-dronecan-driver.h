@@ -18,7 +18,7 @@
 
 // library configuration
 #define DRONECAN_USE_RX_ISR
-#define DRONECAN_RXFRAMEBUFSIZE   64 // actual size is RXFRAMEBUFSIZE * sizeof(CanardCANFrame)
+#define DRONECAN_RXFRAMEBUFSIZE   64 // actual size is RXFRAMEBUFSIZE * sizeof(tDcRxFifoElement)
 #define DRONECAN_IRQ_PRIORITY     14
 
 
@@ -58,8 +58,23 @@ typedef enum
 
 typedef struct
 {
-    uint64_t rx_overflow_count;
-    uint64_t error_count;
+    uint32_t bo_count; // bus off
+    uint32_t lec_count; // lec
+#ifdef DRONECAN_USE_RX_ISR
+    uint32_t rx_overflow_count; // rx fifo overflow
+    uint32_t isr_xtd_count;
+    uint32_t isr_rtr_count;
+    uint32_t isr_fdf_count;
+    uint32_t isr_brs_count;
+    uint32_t isr_dlc_count;
+    uint32_t isr_rf0l_count;
+    uint32_t isr_rf0f_count;
+    uint32_t isr_rf1l_count;
+    uint32_t isr_rf1f_count;
+    uint32_t isr_errors_count;
+    uint32_t isr_errorstatus_count;
+#endif
+    uint32_t error_sum_count;
 } tDcHalStatistics;
 
 
@@ -118,6 +133,7 @@ int16_t dc_hal_compute_timings(
 
 #ifdef DRONECAN_USE_RX_ISR
 int16_t dc_hal_enable_isr(void);
+void dc_hal_rx_flush(void);
 #endif
 
 

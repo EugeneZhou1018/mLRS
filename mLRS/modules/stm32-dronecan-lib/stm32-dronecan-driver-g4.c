@@ -61,7 +61,7 @@ static void _process_error_status(void)
 
     if ((psr & FDCAN_PSR_BO) != 0) { // is bus off
         CLEAR_BIT(hfdcan.Instance->CCCR, FDCAN_CCCR_INIT);
-        dc_hal_stats.error_count++;
+        dc_hal_stats.bo_count++;
         HAL_FDCAN_AbortTxRequest(&hfdcan, FDCAN_TX_BUFFER0 | FDCAN_TX_BUFFER1 | FDCAN_TX_BUFFER2);
     };
 
@@ -70,7 +70,7 @@ static void _process_error_status(void)
     if ((lec != FDCAN_PROTOCOL_ERROR_NONE && lec != FDCAN_PROTOCOL_ERROR_NO_CHANGE) ||
         (dlec != FDCAN_PROTOCOL_ERROR_NONE && dlec != FDCAN_PROTOCOL_ERROR_NO_CHANGE)) {
         CLEAR_BIT(hfdcan.Instance->PSR, FDCAN_PSR_LEC | FDCAN_PSR_DLEC);
-        dc_hal_stats.error_count++;
+        dc_hal_stats.lec_count++;
         if (dc_hal_abort_tx_on_error) {
             HAL_FDCAN_AbortTxRequest(&hfdcan, FDCAN_TX_BUFFER0 | FDCAN_TX_BUFFER1 | FDCAN_TX_BUFFER2);
         }
@@ -302,56 +302,79 @@ int16_t dc_hal_receive(CanardCANFrame* const frame)
 #else // !DRONECAN_USE_RX_ISR
 //-- ISR
 
+#define DC_FDCAN_RX_FIFO_ELEMENT_SIZE  (18U * 4U) // Rx FIFO 0/1 element size in bytes, 2 words + 64 bytes = 18*4
+
+typedef struct
+{
+    uint32_t r0;
+    uint32_t r1;
+    union {
+        uint8_t data[CANARD_CAN_FRAME_MAX_DATA_LEN];
+        uint32_t data_32[CANARD_CAN_FRAME_MAX_DATA_LEN / 4];
+    };
+} tDcRxFifoElement;
+
+typedef enum // see table 400 in datasheet
+{
+    DC_RX_FIFO_R0_XTD_BIT   = 0x40000000U, // Extended identifier
+    DC_RX_FIFO_R0_RTR_BIT   = 0x20000000U, // Remote transmission request
+    DC_RX_FIFO_R1_FDF_BIT   = 0x00200000U, // FD format
+    DC_RX_FIFO_R1_BRS_BIT   = 0x00100000U, // Bit rate switch
+    DC_RX_FIFO_R1_DLC_MASK  = 0x000F0000U, // Data length code
+} DC_RX_FIFO_ELEMENT_ENUM;
+
+
 //#define DRONECAN_RXFRAMEBUFSIZE  64 // that's hopefully sufficient, catches CAN-29bit frames for 4.2 ms
 
-#define DRONECAN_RXFRAMEBUFSIZEMASK  (DRONECAN_RXFRAMEBUFSIZE-1)
+#define DRONECAN_RXFRAMEBUFSIZEMASK  (DRONECAN_RXFRAMEBUFSIZE - 1)
 
-volatile CanardCANFrame dronecan_rxbuf[DRONECAN_RXFRAMEBUFSIZE];
+volatile tDcRxFifoElement dronecan_rxbuf[DRONECAN_RXFRAMEBUFSIZE];
 volatile uint16_t dronecan_rxwritepos; // pos at which the last frame was stored
 volatile uint16_t dronecan_rxreadpos; // pos at which the next frame is to be fetched
 
 
-void _dc_hal_receive_isr(FDCAN_RxHeaderTypeDef* const pRxHeader, uint8_t* const data)
+void _dc_hal_receive_isr(uint32_t* RxAddress)
 {
-CanardCANFrame frame;
-
-    if (pRxHeader->BitRateSwitch != FDCAN_BRS_OFF) {
-        return;
-    }
-    if (pRxHeader->FDFormat != FDCAN_CLASSIC_CAN) {
-        return;
-    }
-    if (pRxHeader->IsFilterMatchingFrame != 0) {
-        // TODO
-    }
+    uint32_t r0 = *RxAddress;
     // DroneCAN uses only EXT frames, so these should be errors
-    if (pRxHeader->IdType != FDCAN_EXTENDED_ID) {
+    if ((r0 & DC_RX_FIFO_R0_XTD_BIT) == 0) {
+        dc_hal_stats.isr_xtd_count++;
         return;
     }
-    if (pRxHeader->RxFrameType != FDCAN_DATA_FRAME) {
-        return;
-    }
-
-    frame.data_len = pRxHeader->DataLength >> 16;
-    if (frame.data_len > 8) {
+    if ((r0 & DC_RX_FIFO_R0_RTR_BIT) != 0) {
+        dc_hal_stats.isr_rtr_count++;
         return;
     }
 
-    frame.id = (pRxHeader->Identifier & CANARD_CAN_EXT_ID_MASK);
-    frame.id |= CANARD_CAN_FRAME_EFF;
+    RxAddress++;
+    uint32_t r1 = *RxAddress;
+    if ((r1 & DC_RX_FIFO_R1_FDF_BIT) != 0) {
+        dc_hal_stats.isr_fdf_count++;
+        return;
+    }
+    if ((r1 & DC_RX_FIFO_R1_BRS_BIT) != 0) {
+        dc_hal_stats.isr_brs_count++;
+        return;
+    }
 
-    //memset(frame.data, 0, 8);
-    memcpy(frame.data, data, frame.data_len);
-
-    frame.iface_id = 0;
+    if ((r1 & DC_RX_FIFO_R1_DLC_MASK) > FDCAN_DLC_BYTES_8) {
+        dc_hal_stats.isr_dlc_count++;
+        return;
+    }
 
     uint16_t next = (dronecan_rxwritepos + 1) & DRONECAN_RXFRAMEBUFSIZEMASK;
     if (dronecan_rxreadpos != next) { // fifo not full
         dronecan_rxwritepos = next;
-        memcpy((uint8_t*)&(dronecan_rxbuf[next]), &frame, sizeof(CanardCANFrame));
+
+        dronecan_rxbuf[next].r0 = r0;
+        dronecan_rxbuf[next].r1 = r1;
+        RxAddress++;
+        dronecan_rxbuf[next].data_32[0] = *RxAddress;
+        RxAddress++;
+        dronecan_rxbuf[next].data_32[1] = *RxAddress;
+
     } else {
         dc_hal_stats.rx_overflow_count++;
-        dc_hal_stats.error_count++;
     }
 }
 
@@ -361,88 +384,89 @@ void FDCAN1_IT0_IRQHandler(void)
 {
     //HAL_FDCAN_IRQHandler(&hfdcan);
     // copy the part relevant to us
+    // flags:
+    // FDCAN_IR_RF0L           // Rx FIFO 0 message lost
+    // FDCAN_IR_RF0F           // Rx FIFO 0 full
+    // FDCAN_IR_RF0N           // New message written to Rx FIFO 0
+    // more descriptive defines are in the HAL, like FDCAN_FLAG_RX_FIFO0_NEW_MESSAGE
+    // #define FDCAN_RX_FIFO0_MASK (FDCAN_IR_RF0L | FDCAN_IR_RF0F | FDCAN_IR_RF0N)
+    // there are also analogous defines
+    // FDCAN_IE_RF0LE          // Rx FIFO 0 message lost
+    // FDCAN_IE_RF0FE          // Rx FIFO 0 full
+    // FDCAN_IE_RF0NE          // New message written to Rx FIFO 0
+    // for which there are also more descriptive defines in the HAL, like FDCAN_IT_RX_FIFO0_NEW_MESSAGE
 
-    uint32_t RxFifo0ITs = hfdcan.Instance->IR & (FDCAN_IR_RF0L | FDCAN_IR_RF0F | FDCAN_IR_RF0N); // __HAL_FDCAN_GET_FLAG()
+    uint32_t RxFifo0ITs = hfdcan.Instance->IR & (FDCAN_IR_RF0N | FDCAN_IR_RF0F | FDCAN_IR_RF0L); // __HAL_FDCAN_GET_FLAG()
     RxFifo0ITs &= hfdcan.Instance->IE; // __HAL_FDCAN_GET_IT_SOURCE()
-
-    if (RxFifo0ITs != 0U) {
-        __HAL_FDCAN_CLEAR_FLAG(&hfdcan, RxFifo0ITs); // clear Rx FIFO0 flags
-
-        if ((RxFifo0ITs & FDCAN_FLAG_RX_FIFO0_NEW_MESSAGE) != 0) {
-            FDCAN_RxHeaderTypeDef RxHeader;
-            uint8_t data[64];
-            if (HAL_FDCAN_GetRxMessage(&hfdcan, FDCAN_RX_FIFO0, &RxHeader, data) == HAL_OK) {
-                _dc_hal_receive_isr(&RxHeader, data);
-            }
-        }
-
-        if ((RxFifo0ITs & FDCAN_FLAG_RX_FIFO0_MESSAGE_LOST) != 0) {
-            dc_hal_stats.error_count++;
-        }
-        if ((RxFifo0ITs & FDCAN_FLAG_RX_FIFO0_FULL) != 0) {
-            dc_hal_stats.rx_overflow_count++;
-            dc_hal_stats.error_count++;
-        }
-    }
-
-    #define FDCAN_ERROR_MASK (FDCAN_IR_ELO | FDCAN_IR_WDI | FDCAN_IR_PEA | FDCAN_IR_PED | FDCAN_IR_ARA)
-    #define FDCAN_ERROR_STATUS_MASK (FDCAN_IR_EP | FDCAN_IR_EW | FDCAN_IR_BO)
-
-    uint32_t Errors = hfdcan.Instance->IR & FDCAN_ERROR_MASK;
-    Errors &= hfdcan.Instance->IE;
-    uint32_t ErrorStatusITs = hfdcan.Instance->IR & FDCAN_ERROR_STATUS_MASK;
-    ErrorStatusITs &= hfdcan.Instance->IE;
-
-    if (Errors != 0) {
-        __HAL_FDCAN_CLEAR_FLAG(&hfdcan, Errors); // clear the Error flags
-        dc_hal_stats.error_count++;
-    }
-    if (ErrorStatusITs != 0) {
-        __HAL_FDCAN_CLEAR_FLAG(&hfdcan, ErrorStatusITs); // clear the Error flags
-        dc_hal_stats.error_count++;
-    }
-}
-
-void FDCAN1_IT1_IRQHandler(void)
-{
-    uint32_t RxFifo1ITs = hfdcan.Instance->IR & (FDCAN_IR_RF1L | FDCAN_IR_RF1F | FDCAN_IR_RF1N);
+    uint32_t RxFifo1ITs = hfdcan.Instance->IR & (FDCAN_IR_RF1N | FDCAN_IR_RF1F | FDCAN_IR_RF1L);
     RxFifo1ITs &= hfdcan.Instance->IE;
 
-    if (RxFifo1ITs != 0U) {
-        __HAL_FDCAN_CLEAR_FLAG(&hfdcan, RxFifo1ITs); // clear Rx FIFO1 flags
+    if (RxFifo0ITs != 0) {
+        __HAL_FDCAN_CLEAR_FLAG(&hfdcan, RxFifo0ITs); // clear Rx FIFO0 flags
 
-        if ((RxFifo1ITs & FDCAN_FLAG_RX_FIFO1_NEW_MESSAGE) != 0) {
-            FDCAN_RxHeaderTypeDef RxHeader;
-            uint8_t data[64];
-            if (HAL_FDCAN_GetRxMessage(&hfdcan, FDCAN_RX_FIFO1, &RxHeader, data) == HAL_OK) {
-                _dc_hal_receive_isr(&RxHeader, data);
+//        if ((RxFifo0ITs & FDCAN_IR_RF0N) != 0 || (RxFifo0ITs & FDCAN_IR_RF0F) != 0) {
+        if ((RxFifo0ITs & (FDCAN_IR_RF0N | FDCAN_IR_RF0F)) != 0) { // do it also if Rx FIFO 0 full
+            // HAL_FDCAN_GetRxMessage()
+            while ((hfdcan.Instance->RXF0S & FDCAN_RXF0S_F0FL) != 0) { // Rx FIFO 0 not empty
+                // calculate Rx FIFO 0 element address
+                uint32_t GetIndex = ((hfdcan.Instance->RXF0S & FDCAN_RXF0S_F0GI) >> FDCAN_RXF0S_F0GI_Pos);
+                uint32_t* RxAddress = (uint32_t*)(hfdcan.msgRam.RxFIFO0SA + (GetIndex * DC_FDCAN_RX_FIFO_ELEMENT_SIZE));
+                _dc_hal_receive_isr(RxAddress);
+                // acknowledge the Rx FIFO 0 that the oldest element is read so that it increments the GetIndex
+                hfdcan.Instance->RXF0A = GetIndex;
             }
         }
 
-        if ((RxFifo1ITs & FDCAN_FLAG_RX_FIFO1_MESSAGE_LOST) != 0) {
-            dc_hal_stats.error_count++;
+        if ((RxFifo0ITs & FDCAN_IR_RF0F) != 0) {
+            dc_hal_stats.isr_rf0f_count++;
         }
-        if ((RxFifo1ITs & FDCAN_FLAG_RX_FIFO1_FULL) != 0) {
-            dc_hal_stats.rx_overflow_count++;
-            dc_hal_stats.error_count++;
+        if ((RxFifo0ITs & FDCAN_IR_RF0L) != 0) {
+            dc_hal_stats.isr_rf0l_count++;
         }
     }
 
-    #define FDCAN_ERROR_MASK (FDCAN_IR_ELO | FDCAN_IR_WDI | FDCAN_IR_PEA | FDCAN_IR_PED | FDCAN_IR_ARA)
-    #define FDCAN_ERROR_STATUS_MASK (FDCAN_IR_EP | FDCAN_IR_EW | FDCAN_IR_BO)
+    if (RxFifo1ITs != 0) {
+        __HAL_FDCAN_CLEAR_FLAG(&hfdcan, RxFifo1ITs); // clear Rx FIFO1 flags
 
-    uint32_t Errors = hfdcan.Instance->IR & FDCAN_ERROR_MASK;
+        if ((RxFifo1ITs & (FDCAN_IR_RF1N | FDCAN_IR_RF1F)) != 0) { // do it also if Rx FIFO 1 full
+            while ((hfdcan.Instance->RXF1S & FDCAN_RXF1S_F1FL) != 0) { // Rx FIFO 1 not empty
+                // calculate Rx FIFO 1 element address
+                uint32_t GetIndex = ((hfdcan.Instance->RXF1S & FDCAN_RXF1S_F1GI) >> FDCAN_RXF1S_F1GI_Pos);
+                uint32_t* RxAddress = (uint32_t*)(hfdcan.msgRam.RxFIFO1SA + (GetIndex * DC_FDCAN_RX_FIFO_ELEMENT_SIZE));
+                _dc_hal_receive_isr(RxAddress);
+                // acknowledge the Rx FIFO 1 that the oldest element is read so that it increments the GetIndex
+                hfdcan.Instance->RXF1A = GetIndex;
+            }
+        }
+
+        if ((RxFifo1ITs & FDCAN_IR_RF1F) != 0) {
+            dc_hal_stats.isr_rf1f_count++;
+        }
+        if ((RxFifo1ITs & FDCAN_IR_RF1L) != 0) {
+            dc_hal_stats.isr_rf1l_count++;
+        }
+    }
+
+    // EOL: Error Logging Overflow                -> Bit and Line Error
+    // WDI: Watchdog Interrupt                    -> Protocol Error
+    // PEA: Protocol Error in Arbitration Phase   -> Protocol Error
+    // PED: Protocol Error in Data Phase          -> Protocol Error
+    // ARA: Access to Reserved Address            -> Protocol Error
+    uint32_t Errors = hfdcan.Instance->IR & (FDCAN_IR_ELO | FDCAN_IR_WDI | FDCAN_IR_PEA | FDCAN_IR_PED | FDCAN_IR_ARA);
     Errors &= hfdcan.Instance->IE;
-    uint32_t ErrorStatusITs = hfdcan.Instance->IR & FDCAN_ERROR_STATUS_MASK;
+    // EP: Error Passive                          -> Bit and Line Error
+    // EW: Warning Status                         -> Protocol Error
+    // BO: Bus_Off Status                         -> Protocol Error
+    uint32_t ErrorStatusITs = hfdcan.Instance->IR & (FDCAN_IR_EP | FDCAN_IR_EW | FDCAN_IR_BO);
     ErrorStatusITs &= hfdcan.Instance->IE;
 
     if (Errors != 0) {
         __HAL_FDCAN_CLEAR_FLAG(&hfdcan, Errors); // clear the Error flags
-        dc_hal_stats.error_count++;
+        dc_hal_stats.isr_errors_count++;
     }
     if (ErrorStatusITs != 0) {
         __HAL_FDCAN_CLEAR_FLAG(&hfdcan, ErrorStatusITs); // clear the Error flags
-        dc_hal_stats.error_count++;
+        dc_hal_stats.isr_errorstatus_count++;
     }
 }
 
@@ -455,6 +479,7 @@ HAL_StatusTypeDef hres;
 
     dronecan_rxwritepos = 0;
     dronecan_rxreadpos = 0;
+    memset(&dc_hal_stats, 0, sizeof(dc_hal_stats));
 
 /* doc in stm32g4xx_hal_fdcan.c says: By default, all interrupts are assigned to line 0
     hres = HAL_FDCAN_ConfigInterruptLines(
@@ -463,22 +488,21 @@ HAL_StatusTypeDef hres;
         FDCAN_INTERRUPT_LINE0);
     if (hres != HAL_OK) { return -DC_HAL_ERROR_ISR_CONFIG; }
 */
-    hres = HAL_FDCAN_ConfigInterruptLines(&hfdcan, FDCAN_IT_GROUP_RX_FIFO0, FDCAN_INTERRUPT_LINE0);
-    if (hres != HAL_OK) { return -DC_HAL_ERROR_ISR_CONFIG; }
-    hres = HAL_FDCAN_ConfigInterruptLines(&hfdcan, FDCAN_IT_GROUP_RX_FIFO1, FDCAN_INTERRUPT_LINE1);
-    if (hres != HAL_OK) { return -DC_HAL_ERROR_ISR_CONFIG; }
 
     hres = HAL_FDCAN_ActivateNotification(
         &hfdcan,
-        FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_RX_FIFO1_NEW_MESSAGE,
-        //FDCAN_IT_LIST_RX_FIFO0 | FDCAN_IT_LIST_RX_FIFO1,
+//        FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_RX_FIFO1_NEW_MESSAGE | FDCAN_IT_BUS_OFF,
+        FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_RX_FIFO0_FULL |
+        FDCAN_IT_RX_FIFO1_NEW_MESSAGE | FDCAN_IT_RX_FIFO1_FULL |
+        FDCAN_IT_BUS_OFF,
+//        FDCAN_IT_LIST_RX_FIFO0 | FDCAN_IT_LIST_RX_FIFO1 | FDCAN_IT_BUS_OFF,
         0);
     if (hres != HAL_OK) { return -DC_HAL_ERROR_ISR_CONFIG; }
 
+    hfdcan.Instance->IR = 0xFFFFFFFF; // clear all flags by writing 1 to them
+
     NVIC_SetPriority(FDCAN1_IT0_IRQn, DRONECAN_IRQ_PRIORITY);
-    NVIC_SetPriority(FDCAN1_IT1_IRQn, DRONECAN_IRQ_PRIORITY);
     NVIC_EnableIRQ(FDCAN1_IT0_IRQn);
-    NVIC_EnableIRQ(FDCAN1_IT1_IRQn);
 
     return 0;
 }
@@ -492,13 +516,37 @@ int16_t dc_hal_receive(CanardCANFrame* const frame)
 
     _process_error_status();
 
-    if (dronecan_rxwritepos == dronecan_rxreadpos) return 0; // fifo empty
+    if (dronecan_rxwritepos == dronecan_rxreadpos) {
+        return 0; // fifo empty
+    }
 
     uint16_t rxreadpos = (dronecan_rxreadpos + 1) & DRONECAN_RXFRAMEBUFSIZEMASK;
     dronecan_rxreadpos = rxreadpos;
-    memcpy(frame, (uint8_t*)&(dronecan_rxbuf[rxreadpos]), sizeof(CanardCANFrame));
+
+    frame->id = (dronecan_rxbuf[rxreadpos].r0 & CANARD_CAN_EXT_ID_MASK);
+    frame->id |= CANARD_CAN_FRAME_EFF;
+
+    frame->data_len = (dronecan_rxbuf[rxreadpos].r1 & DC_RX_FIFO_R1_DLC_MASK) >> 16;
+    if (frame->data_len > CANARD_CAN_FRAME_MAX_DATA_LEN) frame->data_len = CANARD_CAN_FRAME_MAX_DATA_LEN; // should not happen, but play it safe
+/*
+    memset((uint8_t*)frame->data, 0, 8);
+    memcpy((uint8_t*)frame->data, (uint8_t*)dronecan_rxbuf[rxreadpos].data, frame->data_len); */
+    for (uint8_t n = 0; n < CANARD_CAN_FRAME_MAX_DATA_LEN; n++) {
+        frame->data[n] = (n < frame->data_len) ? dronecan_rxbuf[rxreadpos].data[n] : 0;
+    }
+
+
+    frame->iface_id = 0;
 
     return 1;
+}
+
+
+void dc_hal_rx_flush(void)
+{
+    dronecan_rxwritepos = 0;
+    dronecan_rxreadpos = 0;
+    dc_hal_stats.rx_overflow_count = 0;
 }
 
 
@@ -564,6 +612,21 @@ int16_t dc_hal_config_acceptance_filters(
 
 tDcHalStatistics dc_hal_get_stats(void)
 {
+    dc_hal_stats.error_sum_count = dc_hal_stats.bo_count + dc_hal_stats.lec_count;
+#ifdef DRONECAN_USE_RX_ISR
+    dc_hal_stats.error_sum_count += dc_hal_stats.rx_overflow_count;
+    dc_hal_stats.error_sum_count += dc_hal_stats.isr_xtd_count;
+    dc_hal_stats.error_sum_count += dc_hal_stats.isr_rtr_count;
+    dc_hal_stats.error_sum_count += dc_hal_stats.isr_fdf_count;
+    dc_hal_stats.error_sum_count += dc_hal_stats.isr_brs_count;
+    dc_hal_stats.error_sum_count += dc_hal_stats.isr_dlc_count;
+    dc_hal_stats.error_sum_count += dc_hal_stats.isr_rf0l_count;
+    dc_hal_stats.error_sum_count += dc_hal_stats.isr_rf0f_count;
+    dc_hal_stats.error_sum_count += dc_hal_stats.isr_rf1l_count;
+    dc_hal_stats.error_sum_count += dc_hal_stats.isr_rf1f_count;
+    dc_hal_stats.error_sum_count += dc_hal_stats.isr_errors_count;
+    dc_hal_stats.error_sum_count += dc_hal_stats.isr_errorstatus_count;
+#endif
     return dc_hal_stats;
 }
 

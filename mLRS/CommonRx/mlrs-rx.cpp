@@ -600,6 +600,7 @@ RESTARTCONTROLLER
     msp.Init();
     sx_serial.Init();
     fan.SetPower(sx.RfPower_dbm());
+    dronecan.Start();
 
     tick_1hz = 0;
     tick_1hz_commensurate = 0;
