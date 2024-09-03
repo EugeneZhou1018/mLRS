@@ -101,6 +101,7 @@ class tRxDroneCan
 {
   public:
     void Init(void) {}
+    void Start(void) {}
     void Tick_ms(void) {}
     void Do(void) {}
     void SendRcData(tRcData* const rc_out, bool failsafe) {}
