@@ -420,6 +420,12 @@ void tRxDroneCan::flush(void)
     fifo_fc_to_ser.Flush();
     fifo_ser_to_fc.Flush();
 }
+
+
+uint16_t tRxDroneCan::bytes_available(void)
+{
+    return fifo_fc_to_ser.Available();
+}
 #endif
 
 

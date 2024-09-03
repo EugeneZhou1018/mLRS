@@ -80,6 +80,7 @@ class tSerialPort : public tSerialBase
     bool available(void) override { return dronecan.available(); }
     char getc(void) override { return dronecan.getc(); }
     void flush(void) override { dronecan.flush(); }
+    uint16_t bytes_available(void) override { return dronecan.bytes_available(); }
 #endif
 };
 

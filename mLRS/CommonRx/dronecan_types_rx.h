@@ -50,6 +50,8 @@ class tRxDroneCan
     bool available(void);
     uint8_t getc(void);
     void flush(void);
+    uint16_t bytes_available(void);
+
     void handle_tunnel_targetted_broadcast(CanardInstance* const ins, CanardRxTransfer* const transfer);
     void send_tunnel_targetted(void);
 #endif
