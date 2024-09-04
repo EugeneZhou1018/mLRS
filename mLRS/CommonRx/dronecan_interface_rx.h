@@ -225,12 +225,18 @@ void tRxDroneCan::Start(void)
 }
 
 
+bool tRxDroneCan::id_is_allcoated(void)
+{
+    return (canardGetLocalNodeID(&canard) != CANARD_BROADCAST_NODE_ID);
+}
+
+
 int16_t tRxDroneCan::set_can_filters(void)
 {
 tDcHalAcceptanceFilterConfiguration filter_configs[2];
 uint8_t filter_num = 0;
 
-    if (canardGetLocalNodeID(&canard) == CANARD_BROADCAST_NODE_ID) {
+    if (!id_is_allcoated()) {
         // initialize filters as needed for node id allocation at startup, only accept
         // - DYNAMIC_NODE_ID_ALLOCATION broadcasts
         filter_configs[0].rx_fifo = DC_HAL_RX_FIFO0;
@@ -286,7 +292,7 @@ void tRxDroneCan::Tick_ms(void)
     uint64_t tnow_us = micros64(); // call it every ms to ensure it is updated
 
     // do dynamic node allocation if still needed
-    if (canardGetLocalNodeID(&canard) == CANARD_BROADCAST_NODE_ID) {
+    if (!dronecan.id_is_allcoated()) {
         node_id_allocation_running = true;
         if (millis32() > node_id_allocation.send_next_request_at_ms) {
             send_dynamic_node_id_allocation_request();
@@ -329,7 +335,7 @@ dbg.puts("\n ser->fc:   ");dbg.puts(u16toBCD_s(tunnel_targetted_ser_to_fc_rate))
 tunnel_targetted_fc_to_ser_rate = 0;
 tunnel_targetted_ser_to_fc_rate = 0;
 dbg.puts("\n   tx_fifo err: ");dbg.puts(u16toBCD_s(fifo_fc_to_ser_tx_full_error_cnt));
-dbg.puts("\n   err sum: ");dbg.puts(u16toBCD_s(dc_hal_get_stats().error_sum_count));
+dbg.puts("\n       err sum: ");dbg.puts(u16toBCD_s(dc_hal_get_stats().error_sum_count));
 #endif
     }
 }
@@ -344,7 +350,7 @@ void tRxDroneCan::Do(void)
 
 void tRxDroneCan::SendRcData(tRcData* const rc_out, bool failsafe)
 {
-    if (canardGetLocalNodeID(&canard) == CANARD_BROADCAST_NODE_ID) return;
+    if (!dronecan.id_is_allcoated()) return;
 
     uint32_t tnow_ms = millis32();
     if ((tnow_ms - rc_input_tlast_ms) < 19) return; // don't send too fast, DroneCAN is not for racing ...
@@ -693,7 +699,7 @@ return false;
     if (transfer_type == CanardTransferTypeRequest) {
         switch (data_type_id) {
             case UAVCAN_PROTOCOL_GETNODEINFO_ID:
-                if (canardGetLocalNodeID(&canard) == CANARD_BROADCAST_NODE_ID) return false;
+                if (!dronecan.id_is_allcoated()) return false;
                 *out_data_type_signature = UAVCAN_PROTOCOL_GETNODEINFO_REQUEST_SIGNATURE;
                 return true;
         }
@@ -702,12 +708,12 @@ return false;
     if (transfer_type == CanardTransferTypeBroadcast) {
         switch (data_type_id) {
             case UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID:
-                if (canardGetLocalNodeID(&canard) != CANARD_BROADCAST_NODE_ID) return false; // we are done with node id allocation already
+                if (dronecan.id_is_allcoated()) return false; // we are done with node id allocation already
                 *out_data_type_signature = UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_SIGNATURE;
                 return true;
 #ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
             case UAVCAN_TUNNEL_TARGETTED_ID:
-                if (canardGetLocalNodeID(&canard) == CANARD_BROADCAST_NODE_ID) return false;
+                if (!dronecan.id_is_allcoated()) return false;
                 if (!dronecan.tunnel_targetted_enabled) return false;
                 *out_data_type_signature = UAVCAN_TUNNEL_TARGETTED_SIGNATURE;
                 return true;

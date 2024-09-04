@@ -56,6 +56,7 @@ class tRxDroneCan
     void send_tunnel_targetted(void);
 #endif
 
+    bool id_is_allcoated(void);
     bool tunnel_targetted_enabled;
 
   private:
