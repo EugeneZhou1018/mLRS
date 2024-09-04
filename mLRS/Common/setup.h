@@ -163,7 +163,7 @@ void setup_configure_metadata(void)
 
     // Rx SerialPort: "serial,can"
     SetupMetaData.Rx_SerialPort_allowed_mask = 0;  // not available, do not display
-#ifdef DEVICE_HAS_OUT
+#ifdef USE_SERIAL
     SetupMetaData.Rx_SerialPort_allowed_mask |= 0b01; // add serial
 #endif
 #ifdef DEVICE_HAS_DRONECAN
