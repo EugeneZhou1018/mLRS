@@ -187,7 +187,7 @@ void tRxDroneCan::Init(bool ser_over_can_enable_flag)
         // canardSetLocalNodeID(&canard, DRONECAN_PREFERRED_NODE_ID);
         node_id_allocation_running = true;
     } else {
-        // ArduPilot's MAVLink via CAN seems to need a fixed node id
+        // ArduPilot's MAVLink via CAN seems to need a fixed node id, so don't do dynamic id allocation
         canardSetLocalNodeID(&canard, DRONECAN_PREFERRED_NODE_ID);
         node_id_allocation_running = false;
     }
@@ -197,7 +197,7 @@ void tRxDroneCan::Init(bool ser_over_can_enable_flag)
         DBG_DC(dbg.puts("\nERROR: filter config failed");)
     }
 
-    // it appears to not matter if first isr enable and then start, or vice versa
+    // it appears to not matter if first isr is enabled and then start, or vice versa
 #ifdef DRONECAN_USE_RX_ISR
     res = dc_hal_enable_isr();
     if (res < 0) {
@@ -259,7 +259,7 @@ uint8_t filter_num = 0;
         filter_configs[0].mask =
             DC_SERVICE_TYPE_MASK | DC_REQUEST_NOT_RESPONSE_MASK | DC_DESTINATION_ID_MASK | DC_SERVICE_NOT_MESSAGE_MASK;
         filter_num = 1;
-        if (ser_over_can_enabled) {
+        if (ser_over_can_enabled) { // we do accept tunnel targetted transfers
             filter_configs[0].rx_fifo = DC_HAL_RX_FIFO1;
             filter_configs[1].id =
                 DC_MESSAGE_TYPE_TO_CAN_ID(UAVCAN_TUNNEL_TARGETTED_ID) |
@@ -409,14 +409,12 @@ void tRxDroneCan::putbuf(uint8_t* const buf, uint16_t len)
 bool tRxDroneCan::available(void)
 {
     return (fifo_fc_to_ser.Available() > 0);
-    return false;
 }
 
 
 uint8_t tRxDroneCan::getc(void)
 {
     return fifo_fc_to_ser.Get();
-    return 0;
 }
 
 
@@ -591,7 +589,8 @@ void tRxDroneCan::send_dynamic_node_id_allocation_request(void)
     memmove(&allocation_request[1], &my_uid[node_id_allocation.unique_id_offset], uid_size);
 
     // Broadcasting the request
-    canardBroadcast(&canard,
+    canardBroadcast(
+        &canard,
         UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_SIGNATURE,
         UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID,
         &node_id_allocation_transfer_id,
@@ -605,36 +604,48 @@ void tRxDroneCan::send_dynamic_node_id_allocation_request(void)
 
 
 // Handle a tunnel.Targetted message, check if it's for us and proper
-void tRxDroneCan::handle_tunnel_targetted_broadcast(CanardInstance* const ins, CanardRxTransfer* const transfer)
+void tRxDroneCan::handle_tunnel_targetted_broadcast(CanardRxTransfer* const transfer)
 {
-    if (uavcan_tunnel_Targetted_decode(transfer, &_p.tunnel_targetted)) {
-        return; // something went wrong
+    if (!dronecan.id_is_allcoated()) { // this should never happen, but play it safe
+        return;
+    }
+
+    if (uavcan_tunnel_Targetted_decode(transfer, &_p.tunnel_targetted)) { // something is wrong here
+        return;
+    }
+
+    if (transfer->source_node_id == 0) { // this should never happen, but play it safe
+        return;
     }
 
     // must be targeted at us
-    if (_p.tunnel_targetted.target_node != canardGetLocalNodeID(&canard)) return;
+    if (_p.tunnel_targetted.target_node != canardGetLocalNodeID(&canard)) {
+        return;
+    }
+
+    // we expect serial_id to be 0
+    // TODO: should we just store it and reuse when sending?
+    if (_p.tunnel_targetted.serial_id != 0) {
+        return;
+    }
 
     // ArduPilot unfortunately does not set this correctly, so can't check
     //if (_p.tunnel_targetted.protocol.protocol != UAVCAN_TUNNEL_PROTOCOL_MAVLINK2) return;
 
-    // serial_id must be set to 0
-    // TODO: should we just store it and reuse when sending?
-    if (_p.tunnel_targetted.serial_id != 0) return;
-
-    tunnel_targetted_fc_to_ser_rate += _p.tunnel_targetted.buffer.len;
-
     // memorize the node_id of the sender, this is most likely our fc (hopefully true)
-    if (!tunnel_targetted.server_node_id) {
-        tunnel_targetted.server_node_id = transfer->source_node_id;
-    }
+    // just always respond to whoever sends to use
+    tunnel_targetted.server_node_id = transfer->source_node_id;
 
     if (_p.tunnel_targetted.buffer.len == 0) return; // a short cut
 
     if (fifo_fc_to_ser.IsFull() || !fifo_fc_to_ser.HasSpace(_p.tunnel_targetted.buffer.len)) {
         fifo_fc_to_ser_tx_full_error_cnt++;
+        return; // don't try to put into fifo
     }
 
     fifo_fc_to_ser.PutBuf(_p.tunnel_targetted.buffer.data, _p.tunnel_targetted.buffer.len);
+
+    tunnel_targetted_fc_to_ser_rate += _p.tunnel_targetted.buffer.len;
 }
 
 
@@ -645,7 +656,7 @@ void tRxDroneCan::send_tunnel_targetted(void)
     _p.tunnel_targetted.protocol.protocol = UAVCAN_TUNNEL_PROTOCOL_MAVLINK2;
     _p.tunnel_targetted.serial_id = 0;
     _p.tunnel_targetted.options = UAVCAN_TUNNEL_TARGETTED_OPTION_LOCK_PORT;
-    _p.tunnel_targetted.baudrate = Config.SerialBaudrate; // this is ignored by ArduPilot (as it should)
+    _p.tunnel_targetted.baudrate = Config.SerialBaudrate; // this is ignored by ArduPilot (as it should do)
 
     uint16_t data_len = fifo_ser_to_fc.Available();
     _p.tunnel_targetted.buffer.len = (data_len < 120) ? data_len : 120;
@@ -698,8 +709,8 @@ bool dronecan_should_accept_transfer(
                 *out_data_type_signature = UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_SIGNATURE;
                 return true;
             case UAVCAN_TUNNEL_TARGETTED_ID:
+                if (!dronecan.ser_over_can_enabled) return false; // should not happen, play it safe
                 if (!dronecan.id_is_allcoated()) return false;
-                if (!dronecan.ser_over_can_enabled) return false;
                 *out_data_type_signature = UAVCAN_TUNNEL_TARGETTED_SIGNATURE;
                 return true;
         }
@@ -726,7 +737,7 @@ void dronecan_on_transfer_received(CanardInstance* const ins, CanardRxTransfer* 
                 dronecan.handle_dynamic_node_id_allocation_broadcast(ins, transfer);
                 return;
             case UAVCAN_TUNNEL_TARGETTED_ID:
-                dronecan.handle_tunnel_targetted_broadcast(ins, transfer);
+                dronecan.handle_tunnel_targetted_broadcast(transfer);
                 return;
         }
     }
