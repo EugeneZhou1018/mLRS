@@ -10,16 +10,14 @@
 #define DRONECAN_INTERFACE_RX_H
 #pragma once
 
-//#define NOT_DO_NODE_INFO
 
+#include "dronecan_interface_rx_types.h"
 
-#include "dronecan_types_rx.h"
+#ifdef DEVICE_HAS_DRONECAN
 
 #if FDCAN_IRQ_PRIORITY != DRONECAN_IRQ_PRIORITY
 #error FDCAN_IRQ_PRIORITY not eq DRONECAN_IRQ_PRIORITY !
 #endif
-
-#ifdef DEVICE_HAS_DRONECAN
 
 extern tRxDroneCan dronecan;
 
@@ -682,9 +680,6 @@ bool dronecan_should_accept_transfer(
     CanardTransferType transfer_type,
     uint8_t source_node_id)
 {
-#ifdef NOT_DO_NODE_INFO
-return false;
-#endif
     // handle service requests
     if (transfer_type == CanardTransferTypeRequest) {
         switch (data_type_id) {
@@ -698,7 +693,7 @@ return false;
     if (transfer_type == CanardTransferTypeBroadcast) {
         switch (data_type_id) {
             case UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID:
-                if (dronecan.id_is_allcoated()) return false; // we are done with node id allocation already
+                if (dronecan.id_is_allcoated()) return false; // we are already done with node id allocation
                 *out_data_type_signature = UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_SIGNATURE;
                 return true;
             case UAVCAN_TUNNEL_TARGETTED_ID:
@@ -715,9 +710,6 @@ return false;
 // this callback is invoked when a new message or request or response is received
 void dronecan_on_transfer_received(CanardInstance* const ins, CanardRxTransfer* const transfer)
 {
-#ifdef NOT_DO_NODE_INFO
-return;
-#endif
     // handle service requests
     if (transfer->transfer_type == CanardTransferTypeRequest) {
         switch (transfer->data_type_id) {

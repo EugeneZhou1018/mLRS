@@ -48,7 +48,7 @@
 
 // is always uartb (or usb)
 #if defined DEVICE_HAS_DRONECAN && defined DEVICE_IS_RECEIVER
-#include "../CommonRx/dronecan_types_rx.h"
+#include "../CommonRx/dronecan_interface_rx_types.h"
 extern tRxDroneCan dronecan;
 static bool ser_not_can = true;
 #endif
