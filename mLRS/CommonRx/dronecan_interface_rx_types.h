@@ -81,9 +81,13 @@ class tRxDroneCan
     } tunnel_targetted;
     tFifo<uint8_t,RX_SERIAL_RXBUFSIZE> fifo_fc_to_ser; // use the same buf sizes as we would for the uart
     tFifo<uint8_t,TX_SERIAL_TXBUFSIZE> fifo_ser_to_fc;
+    
     uint32_t tunnel_targetted_fc_to_ser_rate;
     uint32_t tunnel_targetted_ser_to_fc_rate;
+    uint32_t tunnel_targetted_handle_rate;
+    uint32_t tunnel_targetted_send_rate;
     uint32_t fifo_fc_to_ser_tx_full_error_cnt;
+    uint32_t tunnel_targetted_error_cnt;
 
     // to not burden the stack
     union {

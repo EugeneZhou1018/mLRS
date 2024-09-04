@@ -165,9 +165,13 @@ void tRxDroneCan::Init(bool ser_over_can_enable_flag)
     tunnel_targetted.server_node_id = 0;
     fifo_fc_to_ser.Flush();
     fifo_ser_to_fc.Flush();
+
     tunnel_targetted_fc_to_ser_rate = 0;
     tunnel_targetted_ser_to_fc_rate = 0;
+    tunnel_targetted_handle_rate = 0;
+    tunnel_targetted_send_rate = 0;
     fifo_fc_to_ser_tx_full_error_cnt = 0;
+    tunnel_targetted_error_cnt = 0;
 
     ser_over_can_enabled = ser_over_can_enable_flag;
 
@@ -325,11 +329,16 @@ void tRxDroneCan::Tick_ms(void)
         send_node_status();
 
 DBG_DC(dbg.puts("\n fc->ser:   ");dbg.puts(u16toBCD_s(tunnel_targetted_fc_to_ser_rate));
+DBG_DC(dbg.puts(" h: "));dbg.puts(u16toBCD_s(tunnel_targetted_handle_rate));
 dbg.puts("\n ser->fc:   ");dbg.puts(u16toBCD_s(tunnel_targetted_ser_to_fc_rate));
+DBG_DC(dbg.puts(" s: "));dbg.puts(u16toBCD_s(tunnel_targetted_send_rate));
 tunnel_targetted_fc_to_ser_rate = 0;
 tunnel_targetted_ser_to_fc_rate = 0;
-dbg.puts("\n   tx_fifo err: ");dbg.puts(u16toBCD_s(fifo_fc_to_ser_tx_full_error_cnt));
-dbg.puts("\n       err sum: ");dbg.puts(u16toBCD_s(dc_hal_get_stats().error_sum_count));)
+tunnel_targetted_handle_rate = 0;
+tunnel_targetted_send_rate = 0;
+dbg.puts("\n   err tx_fifo, tt: ");dbg.puts(u16toBCD_s(fifo_fc_to_ser_tx_full_error_cnt));
+dbg.puts(" ,  ");dbg.puts(u16toBCD_s(tunnel_targetted_error_cnt));
+dbg.puts("\n        err dc sum: ");dbg.puts(u16toBCD_s(dc_hal_get_stats().error_sum_count));)
     }
 }
 
@@ -414,6 +423,7 @@ bool tRxDroneCan::available(void)
 
 uint8_t tRxDroneCan::getc(void)
 {
+    tunnel_targetted_fc_to_ser_rate++;
     return fifo_fc_to_ser.Get();
 }
 
@@ -607,25 +617,30 @@ void tRxDroneCan::send_dynamic_node_id_allocation_request(void)
 void tRxDroneCan::handle_tunnel_targetted_broadcast(CanardRxTransfer* const transfer)
 {
     if (!dronecan.id_is_allcoated()) { // this should never happen, but play it safe
+        tunnel_targetted_error_cnt++;
         return;
     }
 
     if (uavcan_tunnel_Targetted_decode(transfer, &_p.tunnel_targetted)) { // something is wrong here
+        tunnel_targetted_error_cnt++;
         return;
     }
 
     if (transfer->source_node_id == 0) { // this should never happen, but play it safe
+        tunnel_targetted_error_cnt++;
         return;
     }
 
     // must be targeted at us
     if (_p.tunnel_targetted.target_node != canardGetLocalNodeID(&canard)) {
+        tunnel_targetted_error_cnt++; // not actually an error, we count it here for testing
         return;
     }
 
     // we expect serial_id to be 0
     // TODO: should we just store it and reuse when sending?
     if (_p.tunnel_targetted.serial_id != 0) {
+        tunnel_targetted_error_cnt++; // not actually an error, we count it here for testing
         return;
     }
 
@@ -634,6 +649,9 @@ void tRxDroneCan::handle_tunnel_targetted_broadcast(CanardRxTransfer* const tran
 
     // memorize the node_id of the sender, this is most likely our fc (hopefully true)
     // just always respond to whoever sends to use
+    if (tunnel_targetted.server_node_id && tunnel_targetted.server_node_id != transfer->source_node_id) {
+        tunnel_targetted_error_cnt++; // not actually an error, we count it here for testing
+    }
     tunnel_targetted.server_node_id = transfer->source_node_id;
 
     if (_p.tunnel_targetted.buffer.len == 0) return; // a short cut
@@ -645,7 +663,7 @@ void tRxDroneCan::handle_tunnel_targetted_broadcast(CanardRxTransfer* const tran
 
     fifo_fc_to_ser.PutBuf(_p.tunnel_targetted.buffer.data, _p.tunnel_targetted.buffer.len);
 
-    tunnel_targetted_fc_to_ser_rate += _p.tunnel_targetted.buffer.len;
+    tunnel_targetted_handle_rate += _p.tunnel_targetted.buffer.len;
 }
 
 
@@ -672,6 +690,8 @@ void tRxDroneCan::send_tunnel_targetted(void)
         CANARD_TRANSFER_PRIORITY_MEDIUM,
         _buf,
         len);
+
+    tunnel_targetted_send_rate += _p.tunnel_targetted.buffer.len;
 }
 
 
