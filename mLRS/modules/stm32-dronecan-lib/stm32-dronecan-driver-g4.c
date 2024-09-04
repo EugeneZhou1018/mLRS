@@ -80,6 +80,11 @@ static void _process_error_status(void)
         CLEAR_BIT(hfdcan.Instance->PSR, FDCAN_PSR_PXE);
         // dc_hal_stats.pxd_count++; // un-comment only when needed for testing
     }
+
+    uint32_t ecr = READ_REG(hfdcan.Instance->ECR); // read the error counter register, read clears CEL
+    if ((ecr & FDCAN_ECR_CEL) != 0) { // CAN protocol error
+        dc_hal_stats.cel_count += (ecr & FDCAN_ECR_CEL) >> FDCAN_ECR_CEL_Pos;
+    }
 }
 
 
@@ -628,7 +633,8 @@ int16_t dc_hal_config_acceptance_filters(
 
 tDcHalStatistics dc_hal_get_stats(void)
 {
-    dc_hal_stats.error_sum_count = dc_hal_stats.bo_count + dc_hal_stats.lec_count + dc_hal_stats.pxd_count;
+    dc_hal_stats.error_sum_count = dc_hal_stats.bo_count + dc_hal_stats.lec_count +
+                                   dc_hal_stats.pxd_count + dc_hal_stats.cel_count;
 #ifdef DRONECAN_USE_RX_ISR
     dc_hal_stats.error_sum_count += dc_hal_stats.rx_overflow_count;
     dc_hal_stats.error_sum_count += dc_hal_stats.isr_xtd_count;

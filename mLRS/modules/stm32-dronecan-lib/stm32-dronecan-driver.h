@@ -59,8 +59,9 @@ typedef enum
 typedef struct
 {
     uint32_t bo_count; // bus off
-    uint32_t lec_count; // LEC
-    uint32_t pxd_count; // PXD
+    uint32_t lec_count; // PSR reg: LEC
+    uint32_t pxd_count; // PSR reg: PXD
+    uint32_t cel_count; // ECR reg: CEL
 #ifdef DRONECAN_USE_RX_ISR
     uint32_t rx_overflow_count; // rx fifo overflow
     uint32_t isr_xtd_count; // XTD
