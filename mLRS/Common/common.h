@@ -47,7 +47,7 @@
 
 
 // is always uartb (or usb)
-#if defined DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN && defined DEVICE_IS_RECEIVER
+#if defined DEVICE_HAS_DRONECAN && defined DEVICE_IS_RECEIVER
 #include "../CommonRx/dronecan_types_rx.h"
 extern tRxDroneCan dronecan;
 static bool ser_not_can = true;
@@ -78,7 +78,7 @@ class tSerialPort : public tSerialBase
 #endif
 #ifdef DEVICE_IS_RECEIVER
   public:
-#if defined USE_SERIAL && defined DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+#if defined USE_SERIAL && defined DEVICE_HAS_DRONECAN
     void Init(void) override { ser_not_can = true; if (ser_not_can) uartb_init_isroff(); }
     void SetSerialIsSource(bool _ser) { ser_not_can = _ser; if (ser_not_can) uartb_rx_enableisr(ENABLE); }
     void SetBaudRate(uint32_t baud) override { if (ser_not_can) uartb_setprotocol(baud, XUART_PARITY_NO, UART_STOPBIT_1); }
@@ -88,7 +88,7 @@ class tSerialPort : public tSerialBase
     void flush(void) override { uartb_rx_flush(); uartb_tx_flush(); dronecan.flush(); }
     uint16_t bytes_available(void) override { return (ser_not_can) ? uartb_rx_bytesavailable() : dronecan.bytes_available(); }
     bool has_systemboot(void) override { return (ser_not_can) ? uartb_has_systemboot() : false; }
-#elif defined DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+#elif defined DEVICE_HAS_DRONECAN
     void SetSerialIsSource(bool _ser) {}
     void putbuf(uint8_t* buf, uint16_t len) override { dronecan.putbuf(buf, len); }
     bool available(void) override { return dronecan.available(); }

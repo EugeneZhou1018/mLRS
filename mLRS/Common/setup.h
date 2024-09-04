@@ -166,7 +166,7 @@ void setup_configure_metadata(void)
 #ifdef DEVICE_HAS_OUT
     SetupMetaData.Rx_SerialPort_allowed_mask |= 0b01; // add serial
 #endif
-#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+#ifdef DEVICE_HAS_DRONECAN
     SetupMetaData.Rx_SerialPort_allowed_mask |= 0b10; // add can
 #endif
 

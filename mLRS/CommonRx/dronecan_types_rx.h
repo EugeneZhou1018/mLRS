@@ -10,7 +10,7 @@
 #define DRONECAN_TYPES_RX_H
 #pragma once
 
-#if defined DEVICE_HAS_DRONECAN || defined DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+#ifdef DEVICE_HAS_DRONECAN
 
 #include "../Common/libs/fifo.h"
 
@@ -45,7 +45,6 @@ class tRxDroneCan
     void handle_dynamic_node_id_allocation_broadcast(CanardInstance* const ins, CanardRxTransfer* const transfer);
     void send_dynamic_node_id_allocation_request(void);
 
-#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
     void putbuf(uint8_t* const buf, uint16_t len);
     bool available(void);
     uint8_t getc(void);
@@ -54,7 +53,6 @@ class tRxDroneCan
 
     void handle_tunnel_targetted_broadcast(CanardInstance* const ins, CanardRxTransfer* const transfer);
     void send_tunnel_targetted(void);
-#endif
 
     bool id_is_allcoated(void);
     bool tunnel_targetted_enabled;
@@ -81,13 +79,11 @@ class tRxDroneCan
         uint32_t to_fc_tlast_ms;
         uint8_t server_node_id;
     } tunnel_targetted;
-#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
     tFifo<uint8_t,RX_SERIAL_RXBUFSIZE> fifo_fc_to_ser;
     tFifo<uint8_t,TX_SERIAL_TXBUFSIZE> fifo_ser_to_fc;
     uint32_t tunnel_targetted_fc_to_ser_rate;
     uint32_t tunnel_targetted_ser_to_fc_rate;
     uint32_t fifo_fc_to_ser_tx_full_error_cnt;
-#endif
 
     // to not burden the stack
     union {

@@ -15,7 +15,7 @@
 
 #include "dronecan_types_rx.h"
 
-#if defined DEVICE_HAS_DRONECAN || defined DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+#ifdef DEVICE_HAS_DRONECAN
 
 extern tRxDroneCan dronecan;
 
@@ -160,18 +160,13 @@ void tRxDroneCan::Init(bool enable_tunnel_targetted_flag)
     tunnel_targetted_transfer_id = 0;
     tunnel_targetted.to_fc_tlast_ms = 0;
     tunnel_targetted.server_node_id = 0;
-#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
     fifo_fc_to_ser.Flush();
     fifo_ser_to_fc.Flush();
     tunnel_targetted_fc_to_ser_rate = 0;
     tunnel_targetted_ser_to_fc_rate = 0;
     fifo_fc_to_ser_tx_full_error_cnt = 0;
-#endif
 
-    tunnel_targetted_enabled = false;
-#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
     tunnel_targetted_enabled = enable_tunnel_targetted_flag;
-#endif
 
     dbg.puts("\n\n\nCAN init");
 
@@ -185,13 +180,14 @@ void tRxDroneCan::Init(bool enable_tunnel_targetted_flag)
         dronecan_should_accept_transfer,  // callback, see CanardShouldAcceptTransfer
         nullptr);                         // user_reference, unused
 
-    // canardSetLocalNodeID(&canard, DRONECAN_PREFERRED_NODE_ID);
-    node_id_allocation_running = true;
-#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
-    // ArduPilot's MAVLink via CAN seems to need a fixed node id
-    canardSetLocalNodeID(&canard, DRONECAN_PREFERRED_NODE_ID);
-    node_id_allocation_running = false;
-#endif
+    if (!tunnel_targetted_enabled) {
+        // canardSetLocalNodeID(&canard, DRONECAN_PREFERRED_NODE_ID);
+        node_id_allocation_running = true;
+    } else {
+        // ArduPilot's MAVLink via CAN seems to need a fixed node id
+        canardSetLocalNodeID(&canard, DRONECAN_PREFERRED_NODE_ID);
+        node_id_allocation_running = false;
+    }
 
     int16_t res = set_can_filters();
     if (res < 0) {
@@ -260,7 +256,6 @@ uint8_t filter_num = 0;
         filter_configs[0].mask =
             DC_SERVICE_TYPE_MASK | DC_REQUEST_NOT_RESPONSE_MASK | DC_DESTINATION_ID_MASK | DC_SERVICE_NOT_MESSAGE_MASK;
         filter_num = 1;
-#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
         if (tunnel_targetted_enabled) {
             filter_configs[0].rx_fifo = DC_HAL_RX_FIFO1;
             filter_configs[1].id =
@@ -270,7 +265,6 @@ uint8_t filter_num = 0;
                 DC_MESSAGE_TYPE_MASK | DC_SERVICE_NOT_MESSAGE_MASK;
             filter_num = 2;
         }
-#endif
     }
 
     dbg.puts("\nFilter");
@@ -305,7 +299,6 @@ void tRxDroneCan::Tick_ms(void)
         return;
     }
 
-#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
     uint32_t tnow_ms = millis32();
     if (tunnel_targetted.server_node_id) { // don't send before we haven't gotten a tunnel.Targetted from the fc
         if (fifo_ser_to_fc.Available() > 0 || (tnow_ms - tunnel_targetted.to_fc_tlast_ms) > 500) {
@@ -319,7 +312,6 @@ void tRxDroneCan::Tick_ms(void)
         // behaving badly, ok, but why does it crash ??
         fifo_ser_to_fc.Flush();
     }
-#endif
 
     DECc(tick_1Hz, SYSTICK_DELAY_MS(1000));
     if (!tick_1Hz) {
@@ -329,14 +321,12 @@ void tRxDroneCan::Tick_ms(void)
         // emit node status message
         send_node_status();
 
-#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
 dbg.puts("\n fc->ser:   ");dbg.puts(u16toBCD_s(tunnel_targetted_fc_to_ser_rate));
 dbg.puts("\n ser->fc:   ");dbg.puts(u16toBCD_s(tunnel_targetted_ser_to_fc_rate));
 tunnel_targetted_fc_to_ser_rate = 0;
 tunnel_targetted_ser_to_fc_rate = 0;
 dbg.puts("\n   tx_fifo err: ");dbg.puts(u16toBCD_s(fifo_fc_to_ser_tx_full_error_cnt));
 dbg.puts("\n       err sum: ");dbg.puts(u16toBCD_s(dc_hal_get_stats().error_sum_count));
-#endif
     }
 }
 
@@ -406,7 +396,6 @@ void tRxDroneCan::SendRcData(tRcData* const rc_out, bool failsafe)
 // serial interface
 //-------------------------------------------------------
 
-#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
 void tRxDroneCan::putbuf(uint8_t* const buf, uint16_t len)
 {
     fifo_ser_to_fc.PutBuf(buf, len);
@@ -439,7 +428,6 @@ uint16_t tRxDroneCan::bytes_available(void)
 {
     return fifo_fc_to_ser.Available();
 }
-#endif
 
 
 //-------------------------------------------------------
@@ -613,7 +601,6 @@ void tRxDroneCan::send_dynamic_node_id_allocation_request(void)
 }
 
 
-#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
 // Handle a tunnel.Targetted message, check if it's for us and proper
 void tRxDroneCan::handle_tunnel_targetted_broadcast(CanardInstance* const ins, CanardRxTransfer* const transfer)
 {
@@ -672,7 +659,6 @@ void tRxDroneCan::send_tunnel_targetted(void)
         _buf,
         len);
 }
-#endif
 
 
 //-------------------------------------------------------
@@ -711,13 +697,11 @@ return false;
                 if (dronecan.id_is_allcoated()) return false; // we are done with node id allocation already
                 *out_data_type_signature = UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_SIGNATURE;
                 return true;
-#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
             case UAVCAN_TUNNEL_TARGETTED_ID:
                 if (!dronecan.id_is_allcoated()) return false;
                 if (!dronecan.tunnel_targetted_enabled) return false;
                 *out_data_type_signature = UAVCAN_TUNNEL_TARGETTED_SIGNATURE;
                 return true;
-#endif
         }
     }
     return false;
@@ -744,11 +728,9 @@ return;
             case UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID:
                 dronecan.handle_dynamic_node_id_allocation_broadcast(ins, transfer);
                 return;
-#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
             case UAVCAN_TUNNEL_TARGETTED_ID:
                 dronecan.handle_tunnel_targetted_broadcast(ins, transfer);
                 return;
-#endif
         }
     }
 }

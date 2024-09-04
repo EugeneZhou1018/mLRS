@@ -421,12 +421,12 @@ void tRxMavlink::putc(char c)
         }
 #endif
 
-#if defined DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+#if defined DEVICE_HAS_DRONECAN
         // For some not yet understood reasons, the CAN_FRAME MAVLink messages which
         // ArduPilot will send as a response to the command makes the CAN bus get stuck
         // and the receiver don't gets any CAN messages anymore.
         // So, as a stupid workaround we drop these commands for the GCS.
-        if (msg_serial_out.msgid == FASTMAVLINK_MSG_ID_COMMAND_LONG) {
+        if (msg_serial_out.msgid == FASTMAVLINK_MSG_ID_COMMAND_LONG && dronecan.tunnel_targetted_enabled) {
             uint16_t cmd = fmav_msg_command_long_get_field_command(&msg_serial_out);
             if (cmd == MAV_CMD_CAN_FORWARD) return; // don't send to fc
         }
