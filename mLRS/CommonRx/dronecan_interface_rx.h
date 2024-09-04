@@ -11,6 +11,9 @@
 #pragma once
 
 
+#define DBG_DC(x) x // only temporary
+
+
 #include "dronecan_interface_rx_types.h"
 
 #ifdef DEVICE_HAS_DRONECAN
@@ -35,29 +38,30 @@ extern tGlobalConfig Config;
 #define CANARD_POOL_SIZE  4096
 #endif
 
-#define DRONECAN_BUF_SIZE  512 // needs to be larger than max DroneCAN frame
+#define DRONECAN_BUF_SIZE  512 // needs to be larger than the largest DroneCAN frame size
 
 CanardInstance canard;
 uint8_t canard_memory_pool[CANARD_POOL_SIZE]; // doing this static leads to crash in full mLRS code !?
 
 
+// needs to be called not later than every 65 ms
 uint64_t micros64(void)
 {
-static uint64_t base_us = 0;
+static uint64_t overflow_cnt = 0;
 static uint16_t last_cnt;
 
     uint16_t cnt = micros16();
     if (cnt < last_cnt) {
-        base_us += 0x10000;
+      overflow_cnt += 0x10000;
     }
     last_cnt = cnt;
-    return base_us + cnt;
+    return overflow_cnt + cnt;
 }
 
 
 void stm32_uid(uint8_t uid[12])
 {
-    // this is shorter than using LL_GetUID_Word0(), LL_GetUID_Word1(), LL_GetUID_Word2()
+    // shorter than using LL_GetUID_Word0(), LL_GetUID_Word1(), LL_GetUID_Word2()
     uint8_t* uid_ptr = (uint8_t*)UID_BASE;
     memcpy(uid, uid_ptr, 12);
 }
@@ -65,7 +69,7 @@ void stm32_uid(uint8_t uid[12])
 
 uint32_t stm32_cpu_id(void)
 {
-    // easier and more complete that using LL_CPUID_Getxxxx() functions
+    // easier and more complete than using LL_CPUID_Getxxxx() functions
     return SCB->CPUID;
 }
 
@@ -73,7 +77,7 @@ uint32_t stm32_cpu_id(void)
 void dronecan_uid(uint8_t uid[DC_UNIQUE_ID_LEN])
 {
     stm32_uid(uid); // fill first 12 bytes with UID
-    uint32_t cpu_id = stm32_cpu_id();
+    uint32_t cpu_id = stm32_cpu_id(); // fill last bytes with cpu id, this idea is taken from ArduPilot. THX.
     memcpy(&uid[12], &cpu_id, 4);
 }
 
@@ -100,11 +104,9 @@ CanardCANFrame frame;
     while (1) {
         int16_t res = dc_hal_receive(&frame); // 0: no receive, 1: receive, <0: error
         if (res < 0) {
-            dbg.puts("\nERR: rec ");dbg.puts(s16toBCD_s(res));
+            DBG_DC(dbg.puts("\nERR: rec ");dbg.puts(s16toBCD_s(res));)
         }
         if (res <= 0) break; // no receive or error
-//dbg.puts("\nrx ");dbg.puts(u32toHEX_s(frame.id & CANARD_CAN_EXT_ID_MASK));
-//dbg.puts("\nrx");
         res = canardHandleRxFrame(&canard, &frame, micros64()); // 0: ok, <0: error
         return; // only do one
     }
@@ -120,7 +122,6 @@ const CanardCANFrame* frame;
         frame = canardPeekTxQueue(&canard);
         if (!frame) break; // no frame in tx queue
         int16_t res = dc_hal_transmit(frame, millis32());
-//dbg.puts("\ntx ");dbg.puts(s16toBCD_s(res));
         if (res != 0) { // successfully submitted or error, so drop the frame
             canardPopTxQueue(&canard);
         }
@@ -142,7 +143,7 @@ bool dronecan_should_accept_transfer(
 void dronecan_on_transfer_received(CanardInstance* const ins, CanardRxTransfer* const transfer);
 
 
-// CAN peripheral init forward declaration
+// CAN peripheral init, forward declaration
 void can_init(void);
 
 
@@ -170,7 +171,7 @@ void tRxDroneCan::Init(bool ser_over_can_enable_flag)
 
     ser_over_can_enabled = ser_over_can_enable_flag;
 
-    dbg.puts("\n\n\nCAN init");
+    DBG_DC(dbg.puts("\n\n\nCAN init");)
 
     can_init();
 
@@ -193,23 +194,23 @@ void tRxDroneCan::Init(bool ser_over_can_enable_flag)
 
     int16_t res = set_can_filters();
     if (res < 0) {
-        dbg.puts("\nERROR: filter config failed");
+        DBG_DC(dbg.puts("\nERROR: filter config failed");)
     }
 
     // it appears to not matter if first isr enable and then start, or vice versa
 #ifdef DRONECAN_USE_RX_ISR
     res = dc_hal_enable_isr();
     if (res < 0) {
-        dbg.puts("\nERROR: can isr config failed");
+        DBG_DC(dbg.puts("\nERROR: can isr config failed");)
     }
 #endif
 
     res = dc_hal_start();
     if (res < 0) {
-        dbg.puts("\nERROR: can start failed");
+        DBG_DC(dbg.puts("\nERROR: can start failed");)
     }
 
-    dbg.puts("\nCAN inited");
+    DBG_DC(dbg.puts("\nCAN inited");)
 }
 
 
@@ -219,13 +220,13 @@ void tRxDroneCan::Start(void)
     // Hum?? it somehow does not work to call dc_hal_enable_isr() here ??
     dc_hal_rx_flush();
 #endif
-    dbg.puts("\nCAN started");
+    DBG_DC(dbg.puts("\nCAN started");)
 }
 
 
 bool tRxDroneCan::id_is_allcoated(void)
 {
-    return (canardGetLocalNodeID(&canard) != CANARD_BROADCAST_NODE_ID);
+    return (canardGetLocalNodeID(&canard) != CANARD_BROADCAST_NODE_ID); // a node id was set
 }
 
 
@@ -246,7 +247,7 @@ uint8_t filter_num = 0;
         filter_num = 1;
 
     } else {
-        // set reduced filters, only accept
+        // set reduced filters as needed for normal operation, only accept
         // - GETNODEINFO requests
         // - TUNNEL_TARGETTED broadcasts
         filter_configs[0].rx_fifo = DC_HAL_RX_FIFO0;
@@ -269,11 +270,11 @@ uint8_t filter_num = 0;
         }
     }
 
-    dbg.puts("\nFilter");
+    DBG_DC(dbg.puts("\nFilter");
     for (uint8_t n = 0; n < filter_num; n++) {
         dbg.puts("\n  id:   ");dbg.puts(u32toHEX_s(filter_configs[n].id));
         dbg.puts("\n  mask: ");dbg.puts(u32toHEX_s(filter_configs[n].mask));
-    }
+    })
 
     return dc_hal_config_acceptance_filters(filter_configs, filter_num);
 }
@@ -317,18 +318,18 @@ void tRxDroneCan::Tick_ms(void)
 
     DECc(tick_1Hz, SYSTICK_DELAY_MS(1000));
     if (!tick_1Hz) {
-        // purge transfers that are no longer transmitted. This can free up some memory
+        // purge transfers that are no longer transmitted. This can free up some memory.
         canardCleanupStaleTransfers(&canard, tnow_us);
 
         // emit node status message
         send_node_status();
 
-dbg.puts("\n fc->ser:   ");dbg.puts(u16toBCD_s(tunnel_targetted_fc_to_ser_rate));
+DBG_DC(dbg.puts("\n fc->ser:   ");dbg.puts(u16toBCD_s(tunnel_targetted_fc_to_ser_rate));
 dbg.puts("\n ser->fc:   ");dbg.puts(u16toBCD_s(tunnel_targetted_ser_to_fc_rate));
 tunnel_targetted_fc_to_ser_rate = 0;
 tunnel_targetted_ser_to_fc_rate = 0;
 dbg.puts("\n   tx_fifo err: ");dbg.puts(u16toBCD_s(fifo_fc_to_ser_tx_full_error_cnt));
-dbg.puts("\n       err sum: ");dbg.puts(u16toBCD_s(dc_hal_get_stats().error_sum_count));
+dbg.puts("\n       err sum: ");dbg.puts(u16toBCD_s(dc_hal_get_stats().error_sum_count));)
     }
 }
 
@@ -368,7 +369,7 @@ void tRxDroneCan::SendRcData(tRcData* const rc_out, bool failsafe)
     // this message's quality is used by ArduPilot for setting rssi (not LQ)
     // it goes from 0 ... 255
     // so we use the same conversion as in e.g. RADIO_STATUS, so that ArduPilot shows us (nearly) the same value
-    _p.rc_input.quality = (connected()) ? rssi_i8_to_ap(stats.GetLastRssi()) : 0; // stats.GetLQ_rc()
+    _p.rc_input.quality = (connected()) ? rssi_i8_to_ap(stats.GetLastRssi()) : 0;
     if (connected()) {
         _p.rc_input.status |= DRONECAN_SENSORS_RC_RCINPUT_STATUS_QUALITY_VALID;
     }
@@ -445,7 +446,7 @@ void tRxDroneCan::send_node_status(void)
     _p.node_status.mode = UAVCAN_PROTOCOL_NODESTATUS_MODE_OPERATIONAL;
     _p.node_status.sub_mode = 0;
 
-    // put something in vendor specific status
+    // put something in vendor specific status, simply count up
     static uint16_t cnt = 0;
     _p.node_status.vendor_specific_status_code = cnt;
     cnt++;
@@ -484,12 +485,12 @@ void tRxDroneCan::handle_get_node_info_request(CanardInstance* const ins, Canard
     _p.node_info_resp.software_version.optional_field_flags = patch;
     _p.node_info_resp.software_version.vcs_commit = 0; // should put git hash in here
 
-    _p.node_info_resp.hardware_version.major = 0;
+    _p.node_info_resp.hardware_version.major = 0; // we don't have such a thing
     _p.node_info_resp.hardware_version.minor = 0;
 
     dronecan_uid(_p.node_info_resp.hardware_version.unique_id);
 
-    // can be 80 chars, which is always larger than our device name, so no need to worry about too long string
+    // data can be 80 chars, which is always larger than our device name, so no need to worry about too long string
     strcpy((char*)_p.node_info_resp.name.data, "mlrs.");
     strcat((char*)_p.node_info_resp.name.data, DEVICE_NAME);
     for (uint8_t n = 0; n < strlen((char*)_p.node_info_resp.name.data); n ++) {
@@ -517,7 +518,7 @@ void tRxDroneCan::handle_get_node_info_request(CanardInstance* const ins, Canard
 
 // The following two functions for dynamic node id allocation VERY closely follow an example source which
 // was provided by the UAVACN and libcanard projects in around 2017. The original sources seem to not be
-// available anymore. The licence was almost surely  permissive (MIT?) and the author Pavel Kirienko. We
+// available anymore. The license was almost surely permissive (MIT?) and the author Pavel Kirienko. We
 // apologize for not giving more appropriate credit.
 
 // Handle a dynamic node allocation message
@@ -667,10 +668,10 @@ void tRxDroneCan::send_tunnel_targetted(void)
 // DroneCAN/Libcanard call backs
 //-------------------------------------------------------
 
-// this callback is invoked when it detects beginning of a new transfer on the bus that can be received
-// by the local node.
+// This callback is invoked when it detects beginning of a new transfer on the bus that can be
+// received by our node.
 // Return value
-//  true: library will receive the transfer
+//  true: library will accept the transfer
 //  false: library will ignore the transfer.
 // This function must fill in the out_data_type_signature to be the signature of the message.
 bool dronecan_should_accept_transfer(
@@ -707,7 +708,7 @@ bool dronecan_should_accept_transfer(
 }
 
 
-// this callback is invoked when a new message or request or response is received
+// This callback is invoked when a new message or request or response is received
 void dronecan_on_transfer_received(CanardInstance* const ins, CanardRxTransfer* const transfer)
 {
     // handle service requests
@@ -847,19 +848,19 @@ void can_init(void)
     //int16_t res = dc_hal_compute_timings(HAL_RCC_GetPCLK1Freq(), 1000000, &timings);
     int16_t res = dc_hal_compute_timings(HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_FDCAN), 1000000, &timings);
     if (res < 0) {
-        dbg.puts("\nERROR: Solution for CAN timings could not be found");
+        DBG_DC(dbg.puts("\nERROR: Solution for CAN timings could not be found");)
         return;
     }
-    dbg.puts("\n  PCLK1: ");dbg.puts(u32toBCD_s(HAL_RCC_GetPCLK1Freq()));
+    DBG_DC(dbg.puts("\n  PCLK1: ");dbg.puts(u32toBCD_s(HAL_RCC_GetPCLK1Freq()));
     dbg.puts("\n  FDCAN CLK: ");dbg.puts(u32toBCD_s(HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_FDCAN)));
     dbg.puts("\n  Prescaler: ");dbg.puts(u16toBCD_s(timings.bit_rate_prescaler));
     dbg.puts("\n  BS1: ");dbg.puts(u8toBCD_s(timings.bit_segment_1));
     dbg.puts("\n  BS2: ");dbg.puts(u8toBCD_s(timings.bit_segment_2));
-    dbg.puts("\n  SJW: ");dbg.puts(u8toBCD_s(timings.sync_jump_width));
+    dbg.puts("\n  SJW: ");dbg.puts(u8toBCD_s(timings.sync_jump_width));)
 
     res = dc_hal_init(&timings, DC_HAL_IFACE_MODE_AUTOMATIC_TX_ABORT_ON_ERROR);
     if (res < 0) {
-        dbg.puts("\nERROR: Failed to open CAN iface ");dbg.puts(s16toBCD_s(res));
+        DBG_DC(dbg.puts("\nERROR: Failed to open CAN iface ");dbg.puts(s16toBCD_s(res));)
         return;
     }
 }
