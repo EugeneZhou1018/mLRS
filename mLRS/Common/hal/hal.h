@@ -268,7 +268,9 @@ Note: Some "high-level" features are set for each device in the device_conf.h fi
     #define USE_DEBUG
   #endif
 #else
-  #define USE_SERIAL
+  #if !defined DEVICE_HAS_NO_SERIAL
+    #define USE_SERIAL
+  #endif
   #if defined DEBUG_ENABLED && !defined DEVICE_HAS_NO_DEBUG
     #define USE_DEBUG
   #endif

@@ -89,13 +89,13 @@ class tSerialPort : public tSerialBase
     uint16_t bytes_available(void) override { return (ser_not_can) ? uartb_rx_bytesavailable() : dronecan.bytes_available(); }
     bool has_systemboot(void) override { return (ser_not_can) ? uartb_has_systemboot() : false; }
 #elif defined DEVICE_HAS_DRONECAN
-    void SetSerialIsSource(bool _ser) {}
+    void SetSerialIsSource(bool _ser) { ser_not_can = true; } // use ser_not_can to make compiler happy
     void putbuf(uint8_t* buf, uint16_t len) override { dronecan.putbuf(buf, len); }
     bool available(void) override { return dronecan.available(); }
     char getc(void) override { return dronecan.getc(); }
     void flush(void) override { dronecan.flush(); }
     uint16_t bytes_available(void) override { return dronecan.bytes_available(); }
-#else
+#elif defined USE_SERIAL
     void Init(void) override { uartb_init(); }
     void SetSerialIsSource(bool _ser) {}
     void SetBaudRate(uint32_t baud) override { uartb_setprotocol(baud, XUART_PARITY_NO, UART_STOPBIT_1); }
@@ -105,6 +105,8 @@ class tSerialPort : public tSerialBase
     void flush(void) override { uartb_rx_flush(); uartb_tx_flush(); }
     uint16_t bytes_available(void) override { return uartb_rx_bytesavailable(); }
     bool has_systemboot(void) override { return uartb_has_systemboot(); }
+#else
+    void SetSerialIsSource(bool _ser) {}
 #endif
 #endif
 };
