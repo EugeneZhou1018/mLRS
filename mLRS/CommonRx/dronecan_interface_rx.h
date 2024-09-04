@@ -15,6 +15,10 @@
 
 #include "dronecan_types_rx.h"
 
+#if FDCAN_IRQ_PRIORITY != DRONECAN_IRQ_PRIORITY
+#error FDCAN_IRQ_PRIORITY not eq DRONECAN_IRQ_PRIORITY !
+#endif
+
 #ifdef DEVICE_HAS_DRONECAN
 
 extern tRxDroneCan dronecan;
