@@ -34,7 +34,7 @@
 class tRxDroneCan
 {
   public:
-    void Init(bool enable_tunnel_targetted_flag);
+    void Init(bool ser_over_can_enable_flag);
     void Start(void); // do this as closely as possible before the loop
     void Tick_ms(void);
     void Do(void);
@@ -55,7 +55,7 @@ class tRxDroneCan
     void send_tunnel_targetted(void);
 
     bool id_is_allcoated(void);
-    bool tunnel_targetted_enabled;
+    bool ser_over_can_enabled;
 
   private:
     int16_t set_can_filters(void);
@@ -101,7 +101,7 @@ class tRxDroneCan
 class tRxDroneCan
 {
   public:
-    void Init(bool enable_tunnel_targetted_flag) {}
+    void Init(bool ser_over_can_enable_flag) {}
     void Start(void) {}
     void Tick_ms(void) {}
     void Do(void) {}
