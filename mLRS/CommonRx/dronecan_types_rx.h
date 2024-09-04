@@ -34,7 +34,7 @@
 class tRxDroneCan
 {
   public:
-    void Init(void);
+    void Init(bool enable_tunnel_targetted_flag);
     void Start(void); // do this as closely as possible before the loop
     void Tick_ms(void);
     void Do(void);
@@ -55,6 +55,8 @@ class tRxDroneCan
     void handle_tunnel_targetted_broadcast(CanardInstance* const ins, CanardRxTransfer* const transfer);
     void send_tunnel_targetted(void);
 #endif
+
+    bool tunnel_targetted_enabled;
 
   private:
     int16_t set_can_filters(void);
@@ -102,7 +104,7 @@ class tRxDroneCan
 class tRxDroneCan
 {
   public:
-    void Init(void) {}
+    void Init(bool enable_tunnel_targetted_flag) {}
     void Start(void) {}
     void Tick_ms(void) {}
     void Do(void) {}

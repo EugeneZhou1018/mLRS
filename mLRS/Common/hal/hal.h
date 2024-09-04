@@ -269,9 +269,7 @@ Note: Some "high-level" features are set for each device in the device_conf.h fi
     #define USE_DEBUG
   #endif
 #else
-  #if !defined DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN // we currently simply substitute a serial by the CAN port, no user choice yet
-    #define USE_SERIAL
-  #endif
+  #define USE_SERIAL
   #if defined DEBUG_ENABLED && !defined DEVICE_HAS_NO_DEBUG
     #define USE_DEBUG
   #endif

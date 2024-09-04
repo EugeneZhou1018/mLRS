@@ -148,7 +148,7 @@ void can_init(void);
 // RxDroneCan class implementation
 //-------------------------------------------------------
 
-void tRxDroneCan::Init(void)
+void tRxDroneCan::Init(bool enable_tunnel_targetted_flag)
 {
     tick_1Hz = 0;
     node_status_transfer_id = 0;
@@ -166,6 +166,11 @@ void tRxDroneCan::Init(void)
     tunnel_targetted_fc_to_ser_rate = 0;
     tunnel_targetted_ser_to_fc_rate = 0;
     fifo_fc_to_ser_tx_full_error_cnt = 0;
+#endif
+
+    tunnel_targetted_enabled = false;
+#ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
+    tunnel_targetted_enabled = enable_tunnel_targetted_flag;
 #endif
 
     dbg.puts("\n\n\nCAN init");
@@ -193,7 +198,7 @@ void tRxDroneCan::Init(void)
         dbg.puts("\nERROR: filter config failed");
     }
 
-    // it appears to not matter if firs isr enable and then start, or vice versa
+    // it appears to not matter if first isr enable and then start, or vice versa
 #ifdef DRONECAN_USE_RX_ISR
     res = dc_hal_enable_isr();
     if (res < 0) {
@@ -250,13 +255,15 @@ uint8_t filter_num = 0;
             DC_SERVICE_TYPE_MASK | DC_REQUEST_NOT_RESPONSE_MASK | DC_DESTINATION_ID_MASK | DC_SERVICE_NOT_MESSAGE_MASK;
         filter_num = 1;
 #ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
-        filter_configs[0].rx_fifo = DC_HAL_RX_FIFO1;
-        filter_configs[1].id =
-            DC_MESSAGE_TYPE_TO_CAN_ID(UAVCAN_TUNNEL_TARGETTED_ID) |
-            DC_SERVICE_NOT_MESSAGE_TO_CAN_ID(0x00);
-        filter_configs[1].mask =
-            DC_MESSAGE_TYPE_MASK | DC_SERVICE_NOT_MESSAGE_MASK;
-        filter_num = 2;
+        if (tunnel_targetted_enabled) {
+            filter_configs[0].rx_fifo = DC_HAL_RX_FIFO1;
+            filter_configs[1].id =
+                DC_MESSAGE_TYPE_TO_CAN_ID(UAVCAN_TUNNEL_TARGETTED_ID) |
+                DC_SERVICE_NOT_MESSAGE_TO_CAN_ID(0x00);
+            filter_configs[1].mask =
+                DC_MESSAGE_TYPE_MASK | DC_SERVICE_NOT_MESSAGE_MASK;
+            filter_num = 2;
+        }
 #endif
     }
 
@@ -701,6 +708,7 @@ return false;
 #ifdef DEVICE_HAS_DRONECAN_W_MAV_OVER_CAN
             case UAVCAN_TUNNEL_TARGETTED_ID:
                 if (canardGetLocalNodeID(&canard) == CANARD_BROADCAST_NODE_ID) return false;
+                if (!dronecan.tunnel_targetted_enabled) return false;
                 *out_data_type_signature = UAVCAN_TUNNEL_TARGETTED_SIGNATURE;
                 return true;
 #endif

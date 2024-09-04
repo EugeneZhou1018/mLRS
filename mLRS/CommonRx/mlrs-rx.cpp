@@ -159,7 +159,8 @@ void init_hw(void)
 
     rxclock.Init(Config.frame_rate_ms); // rxclock needs Config, so call after setup_init()
 
-    dronecan.Init(); // after delay_init() since it needs delay
+    dronecan.Init(Setup.Rx.SerialPort == RX_SERIAL_PORT_CAN); // after delay_init() since it needs delay
+    serial.SetSerialIsSource(Setup.Rx.SerialPort != RX_SERIAL_PORT_CAN);
 }
 
 
