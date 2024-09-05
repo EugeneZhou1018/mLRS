@@ -22,6 +22,7 @@
 extern volatile uint32_t millis32(void);
 extern bool connected(void);
 extern tStats stats;
+extern tSetup Setup;
 
 
 //-------------------------------------------------------
