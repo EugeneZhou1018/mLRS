@@ -28,6 +28,7 @@ extern uint16_t micros16(void);
 extern volatile uint32_t millis32(void);
 extern bool connected(void);
 extern tStats stats;
+extern tSetup Setup;
 extern tGlobalConfig Config;
 
 #ifndef DRONECAN_PREFERRED_NODE_ID
@@ -644,8 +645,20 @@ void tRxDroneCan::handle_tunnel_targetted_broadcast(CanardRxTransfer* const tran
         return;
     }
 
-    // ArduPilot unfortunately does not set this correctly, so can't check
-    //if (_p.tunnel_targetted.protocol.protocol != UAVCAN_TUNNEL_PROTOCOL_MAVLINK2) return;
+    if (SERIAL_LINK_MODE_IS_MAVLINK(Setup.Rx.SerialLinkMode)) {
+        // ArduPilot unfortunately does not set this correctly, so we can't check, but check if it is set
+        if (_p.tunnel_targetted.protocol.protocol != UAVCAN_TUNNEL_PROTOCOL_UNDEFINED &&
+            _p.tunnel_targetted.protocol.protocol != UAVCAN_TUNNEL_PROTOCOL_MAVLINK2) {
+            tunnel_targetted_error_cnt++;
+            return;
+        }
+    } else
+    if (SERIAL_LINK_MODE_IS_MSP(Setup.Rx.SerialLinkMode)) {
+        if (_p.tunnel_targetted.protocol.protocol != UAVCAN_TUNNEL_PROTOCOL_UNDEFINED) {
+            tunnel_targetted_error_cnt++;
+            return;
+        }
+    }
 
     // memorize the node_id of the sender, this is most likely our fc (hopefully true)
     // just always respond to whoever sends to use
@@ -671,7 +684,11 @@ void tRxDroneCan::handle_tunnel_targetted_broadcast(CanardRxTransfer* const tran
 void tRxDroneCan::send_tunnel_targetted(void)
 {
     _p.tunnel_targetted.target_node = tunnel_targetted.server_node_id;
-    _p.tunnel_targetted.protocol.protocol = UAVCAN_TUNNEL_PROTOCOL_MAVLINK2;
+    if (SERIAL_LINK_MODE_IS_MAVLINK(Setup.Rx.SerialLinkMode)) {
+        _p.tunnel_targetted.protocol.protocol = UAVCAN_TUNNEL_PROTOCOL_MAVLINK2;
+    } else {
+        _p.tunnel_targetted.protocol.protocol = UAVCAN_TUNNEL_PROTOCOL_UNDEFINED;
+    }
     _p.tunnel_targetted.serial_id = 0;
     _p.tunnel_targetted.options = UAVCAN_TUNNEL_TARGETTED_OPTION_LOCK_PORT;
     _p.tunnel_targetted.baudrate = Config.SerialBaudrate; // this is ignored by ArduPilot (as it should do)
