@@ -646,7 +646,8 @@ void tRxDroneCan::handle_tunnel_targetted_broadcast(CanardRxTransfer* const tran
     }
 
     if (SERIAL_LINK_MODE_IS_MAVLINK(Setup.Rx.SerialLinkMode)) {
-        // ArduPilot unfortunately does not set this correctly, so we can't check, but check if it is set
+        // ArduPilot <= v4.5.x doesn't set protocol correctly, so we can't check -> we check only when it is set
+        // when v4.6 is out, we could require having to use v4.6, by mandating also correct protocol
         if (_p.tunnel_targetted.protocol.protocol != UAVCAN_TUNNEL_PROTOCOL_UNDEFINED &&
             _p.tunnel_targetted.protocol.protocol != UAVCAN_TUNNEL_PROTOCOL_MAVLINK2) {
             tunnel_targetted_error_cnt++;
