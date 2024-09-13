@@ -7,7 +7,7 @@
 // Basic but effective & reliable transparent WiFi or Bluetooth <-> serial bridge.
 // Minimizes wireless traffic while respecting latency by better packeting algorithm.
 //*******************************************************
-// 31. Aug. 2023
+// 13. Sep. 2023
 //*********************************************************/
 // inspired by examples from Arduino
 // ArduinoIDE 2.0.3, esp32 by Espressif Systems 2.0.6
@@ -63,6 +63,11 @@ List of supported modules, and board which needs to be selected
 // 0 = WiFi TCP, 1 = WiFi UDP, 2 = Wifi UDPCl, 3 = Bluetooth (not available for all boards)
 #define WIRELESS_PROTOCOL  1
 
+// GPIO0 usage
+// uncomment, if your Tx module supports the RESET and GPIO0 lines on the EPS32
+// the number determines the IO pin, usally it is 0
+#define GPIO0_IO  0
+
 
 //**********************//
 //*** WiFi settings ***//
@@ -84,15 +89,10 @@ IPAddress ip_udpcl(192, 168, 0, 164); // connect to this IP // MissionPlanner de
 
 int port_udpcl = 14550; // connect to this port per UDPCL // MissionPlanner default is 14550
 
-// WiFi channel
-// 1 is the default, 13 (2461-2483 MHz) has the least overlap with mLRS 2.4 GHz frequencies.
-// Note: Channel 13 is generally not available in the US, where 11 is the maximum.
-int wifi_channel = 6;
-
 // WiFi power
 // comment out for default setting
 // Note: In order to find the possible options, right click on WIFI_POWER_19_5dBm and choose "Go To Definiton"
-#define WIFI_POWER  WIFI_POWER_2dBm // WIFI_POWER_MINUS_1dBm is the lowest possible, WIFI_POWER_19_5dBm is the max
+#define WIFI_POWER_MEDIUM  WIFI_POWER_2dBm // WIFI_POWER_MINUS_1dBm is the lowest possible, WIFI_POWER_19_5dBm is the max
 
 
 //**************************//
@@ -103,9 +103,6 @@ String bluetooth_device_name = "mLRS BT"; // Bluetooth device name
 
 //************************//
 //*** General settings ***//
-
-// Baudrate
-int baudrate = 115200;
 
 // Serial port usage (only effective for the generic module)
 // comment all for default behavior, which is using only Serial port
@@ -169,6 +166,30 @@ BluetoothSerial SerialBT;
 
 #endif
 
+typedef enum {
+    WIFI_POWER_LOW = 0,
+    WIFI_POWER_MED,
+    WIFI_POWER_MAX,
+} WIFI_POWER_ENUM;
+
+#define BAUDRATE_DEFAULT  115200
+#define WIFICHANNEL_DEFAULT  6
+#define WIFIPOWER_DEFAULT  WIFI_POWER_MED
+
+#define G_BAUDRATE_STR  "baudrate"
+int g_baudrate;
+#define G_WIFICHANNEL_STR  "wifichannel"
+int g_wifichannel;
+#define G_WIFIPOWER_STR  "wifipower"
+int g_wifipower;
+
+#ifdef GPIO0_IO
+#include <Preferences.h>
+Preferences preferences;
+#include "mlrs-wireless-bridge-at-mode.h"
+AtMode at_mode;
+#endif
+
 bool led_state;
 unsigned long led_tlast_ms;
 bool is_connected;
@@ -186,27 +207,69 @@ void serialFlushRx(void)
 // setup() and loop()
 //-------------------------------------------------------
 
+void setup_wifipower()
+{
+    //WiFi.setTxPower(WIFI_POWER); // set WiFi power, AP or STA must have been started, returns false if it fails
+    switch (g_wifipower) {
+        case WIFI_POWER_LOW: WiFi.setTxPower(WIFI_POWER_MINUS_1dBm); break;
+#ifdef WIFI_POWER_MEDIUM
+        case WIFI_POWER_MED: WiFi.setTxPower(WIFI_POWER_MEDIUM); break;
+#else
+        case WIFI_POWER_MED: WiFi.setTxPower(WIFI_POWER_5dBm); break;
+#endif        
+        case WIFI_POWER_MAX: WiFi.setTxPower(WIFI_POWER_21dBm); break;
+    }
+}
+
+
 void setup()
 {
     led_init();
     dbg_init();
+    preferences.begin("setup", false);     
     delay(500);
+     
+    // Preferences 
+    g_baudrate = preferences.getInt(G_BAUDRATE_STR, 0); // 0 indicates not available
+    if (g_baudrate != 9600 && g_baudrate != 19200 && g_baudrate != 38400 &&
+        g_baudrate != 57600 && g_baudrate != 115200 && g_baudrate != 230400) { // not a valid value
+        g_baudrate = BAUDRATE_DEFAULT;
+        preferences.putInt(G_BAUDRATE_STR, g_baudrate);
+    }
 
+    g_wifichannel = preferences.getInt(G_WIFICHANNEL_STR, 0); // 0 indicates not available
+    if (g_wifichannel != 1 && g_wifichannel != 6 && g_wifichannel != 11 && g_wifichannel != 13) { // not a valid value
+        g_wifichannel = WIFICHANNEL_DEFAULT;
+        preferences.putInt(G_WIFICHANNEL_STR, g_wifichannel);
+    }
+
+    g_wifipower = preferences.getInt(G_WIFIPOWER_STR, 255); // 255 indicates not available
+    if (g_wifipower < WIFI_POWER_LOW || g_wifipower > WIFI_POWER_MAX) { // not a valid value
+        g_wifipower = WIFIPOWER_DEFAULT;
+        preferences.putInt(G_WIFIPOWER_STR, g_wifipower);
+    }
+
+    // Serial 
     size_t rxbufsize = SERIAL.setRxBufferSize(2*1024); // must come before uart started, retuns 0 if it fails
     size_t txbufsize = SERIAL.setTxBufferSize(512); // must come before uart started, retuns 0 if it fails
 #ifdef SERIAL_RXD // if SERIAL_TXD is not defined the compiler will complain, so all good
   #ifdef USE_SERIAL_INVERTED
-    SERIAL.begin(baudrate, SERIAL_8N1, SERIAL_RXD, SERIAL_TXD, true);
+    SERIAL.begin(g_baudrate, SERIAL_8N1, SERIAL_RXD, SERIAL_TXD, true);
   #else
-    SERIAL.begin(baudrate, SERIAL_8N1, SERIAL_RXD, SERIAL_TXD);
+    SERIAL.begin(g_baudrate, SERIAL_8N1, SERIAL_RXD, SERIAL_TXD);
   #endif
 #else
-    SERIAL.begin(baudrate);
+    SERIAL.begin(g_baudrate);
 #endif
 //????used to work    pinMode(U1_RXD, INPUT_PULLUP); // important, at least in older versions Arduino serial lib did not do it
 
     DBG_PRINTLN(rxbufsize);
     DBG_PRINTLN(txbufsize);
+
+    // Gpio0 handling
+#ifdef GPIO0_IO
+    at_mode.Init(GPIO0_IO);
+#endif
 
 #if (WIRELESS_PROTOCOL <= 1)
 //-- WiFi TCP, UDP
@@ -219,15 +282,13 @@ void setup()
   #else
     String ssid_full = ssid + " TCP";
   #endif
-    WiFi.softAP(ssid_full.c_str(), (password.length()) ? password.c_str() : NULL, wifi_channel); // channel = 1 is default
+    WiFi.softAP(ssid_full.c_str(), (password.length()) ? password.c_str() : NULL, g_wifichannel); // channel = 1 is default
     DBG_PRINT("ap ip address: ");
     DBG_PRINTLN(WiFi.softAPIP()); // comes out as 192.168.4.1
     DBG_PRINT("channel: ");
     DBG_PRINTLN(WiFi.channel());
 
-  #ifdef WIFI_POWER
-    WiFi.setTxPower(WIFI_POWER); // set WiFi power, AP or STA must have been started, returns false if it fails
-  #endif
+    setup_wifipower();
   #if (WIRELESS_PROTOCOL == 1)
     udp.begin(port_udp);
   #else
@@ -255,9 +316,7 @@ void setup()
     DBG_PRINT("network ip address: ");
     DBG_PRINTLN(WiFi.localIP());
 
-  #ifdef WIFI_POWER
-    WiFi.setTxPower(WIFI_POWER); // set WiFi power, AP or STA must have been started, returns false if it fails
-  #endif
+    setup_wifipower();
     udp.begin(port_udpcl);
 
 #elif (WIRELESS_PROTOCOL == 3)
@@ -281,6 +340,10 @@ void setup()
 
 void loop()
 {
+#ifdef GPIO0_IO
+    if (at_mode.Do()) return;
+#endif
+
     unsigned long tnow_ms = millis();
 
     if (is_connected && (tnow_ms - is_connected_tlast_ms > 2000)) { // nothing from GCS for 2 secs

@@ -244,6 +244,9 @@ void setup_default(uint8_t config_id)
     Setup.Tx[config_id].CliLineEnd = SETUP_TX_CLI_LINE_END;
     Setup.Tx[config_id].MavlinkComponent = SETUP_TX_MAV_COMPONENT;
 
+    Setup.Tx[config_id].WifiChannel = WIFI_CHANNEL_6;
+    Setup.Tx[config_id].WifiPower = WIFI_POWER_MED;
+
     Setup.Rx.Power = SETUP_RX_POWER;
     Setup.Rx.Diversity = SETUP_RX_DIVERSITY;
     Setup.Rx.ChannelOrder = SETUP_RX_CHANNEL_ORDER;
@@ -369,6 +372,14 @@ void setup_sanitize_config(uint8_t config_id)
         (Setup.Tx[config_id].SerialDestination == SERIAL_DESTINATION_MBRDIGE)) {
         Setup.Tx[config_id].SerialDestination = SERIAL_DESTINATION_SERIAL;
     }
+
+#ifdef USE_ESP_WIFI_BRIDGE_RST_GPIO0
+    SANITIZE(Tx[config_id].WifiChannel, WIFI_CHANNEL_NUM, WIFI_CHANNEL_6, WIFI_CHANNEL_6);
+    SANITIZE(Tx[config_id].WifiPower, WIFI_POWER_NUM, WIFI_POWER_MED, WIFI_POWER_MED);
+#else
+    Tx[config_id].WifiChannel = WIFI_CHANNEL_6; // force them to default
+    Tx[config_id].WifiPower = WIFI_POWER_MED;
+#endif
 
     //-- Rx:
 

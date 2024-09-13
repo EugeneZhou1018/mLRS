@@ -189,6 +189,23 @@ typedef enum {
 } TX_BUZZER_END_ENUM;
 
 
+typedef enum {
+    WIFI_CHANNEL_1 = 0,
+    WIFI_CHANNEL_6,
+    WIFI_CHANNEL_11,
+    WIFI_CHANNEL_13,
+    WIFI_CHANNEL_NUM,
+} TX_WIFI_CHANNEL_ENUM;
+
+
+typedef enum {
+    WIFI_POWER_LOW = 0,
+    WIFI_POWER_MED,
+    WIFI_POWER_MAX,
+    WIFI_POWER_NUM,
+} TX_WIFI_POWER_ENUM;
+
+
 //-- Rx only
 
 typedef enum {
@@ -291,8 +308,10 @@ typedef struct
     uint8_t Buzzer;
     uint8_t CliLineEnd;
     uint8_t MavlinkComponent;
+    uint8_t WifiChannel;
+    uint8_t WifiPower;
 
-    uint8_t spare[8];
+    uint8_t spare[6];
 } tTxSetup; // 20 bytes
 
 
