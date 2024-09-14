@@ -35,6 +35,9 @@ List of supported modules, and board which needs to be selected
 - M5Stack ATOM Lite               board: M5Stack-ATOM
 */
 
+// ATTENTION:
+// One may have to choose Partition Scheme = "No OTA (Large App)" !!
+
 //-------------------------------------------------------
 // User configuration
 //-------------------------------------------------------
@@ -46,7 +49,7 @@ List of supported modules, and board which needs to be selected
 //#define MODULE_NODEMCU_ESP32_WROOM32
 //#define MODULE_ESP32_PICO_KIT
 //#define MODULE_ADAFRUIT_QT_PY_ESP32_S2
-//#define MODULE_TTGO_MICRO32
+#define MODULE_TTGO_MICRO32
 //#define MODULE_M5STAMP_C3_MATE
 //#define MODULE_M5STAMP_C3U_MATE
 //#define MODULE_M5STAMP_C3U_MATE_FOR_FRSKY_R9M // uses inverted serial
@@ -72,7 +75,7 @@ List of supported modules, and board which needs to be selected
 //**********************//
 //*** WiFi settings ***//
 
-// for TCP, UDP
+// for TCP, UDP (only for these)
 String ssid = "mLRS AP"; // Wifi name
 String password = ""; // "thisisgreat"; // WiFi password, "" makes it an open AP
 
@@ -81,7 +84,7 @@ IPAddress ip(192, 168, 4, 55); // connect to this IP // MissionPlanner default i
 int port_tcp = 5760; // connect to this port per TCP // MissionPlanner default is 5760
 int port_udp = 14550; // connect to this port per UDP // MissionPlanner default is 14550
 
-// for UDPCl
+// for UDPCl (only for it)
 String network_ssid = "****"; // name of your WiFi network
 String network_password = "****"; // password to access your WiFi network
 
@@ -119,15 +122,12 @@ String bluetooth_device_name = "mLRS BT"; // Bluetooth device name
 // Includes
 //-------------------------------------------------------
 
-#if (WIRELESS_PROTOCOL <= 2) // WiFi
-  #include <WiFi.h>
-#elif (WIRELESS_PROTOCOL == 3) // Bluetooth
-  #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
+#include <WiFi.h>
+#if (WIRELESS_PROTOCOL != 2) // not UDPCl
+#if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
     #error Bluetooth is not enabled !
-  #endif
-  #include <BluetoothSerial.h>
-#else
-  #error Invalid WIRELESS_PROTOCOL chosen !
+#endif
+#include <BluetoothSerial.h>
 #endif
 
 
@@ -142,17 +142,19 @@ String bluetooth_device_name = "mLRS BT"; // Bluetooth device name
 // Internals
 //-------------------------------------------------------
 
-#if (WIRELESS_PROTOCOL <= 1) // WiFi TCP, UDP
+#if (WIRELESS_PROTOCOL != 2) // WiFi TCP, UDP, BT
 
+// WiFi TCP, UDP
 IPAddress ip_udp(ip[0], ip[1], ip[2], ip[3]+1); // usually the client/MissionPlanner gets assigned +1
 IPAddress ip_gateway(0, 0, 0, 0);
 IPAddress netmask(255, 255, 255, 0);
-#if WIRELESS_PROTOCOL == 1 // UDP
-    WiFiUDP udp;
-#else // TCP
-    WiFiServer server(port_tcp);
-    WiFiClient client;
-#endif
+// UDP
+WiFiUDP udp;
+// TCP
+WiFiServer server(port_tcp);
+WiFiClient client;
+// Bluetooth
+BluetoothSerial SerialBT;
 
 #elif (WIRELESS_PROTOCOL == 2) // WiFi UDPCl
 
@@ -160,17 +162,24 @@ IPAddress ip_gateway(0, 0, 0, 0);
 IPAddress netmask(255, 255, 255, 0);
 WiFiUDP udp;
 
-#elif (WIRELESS_PROTOCOL == 3) // Bluetooth
-
-BluetoothSerial SerialBT;
-
 #endif
+
+typedef enum {
+    WIRELESS_PROTOCOL_TCP = 0,
+    WIRELESS_PROTOCOL_UDP = 1,
+    WIRELESS_PROTOCOL_UDPCl = 2,
+    WIRELESS_PROTOCOL_BT = 3,
+} WIRELESS_PROTOCOL_ENUM;
 
 typedef enum {
     WIFI_POWER_LOW = 0,
     WIFI_POWER_MED,
     WIFI_POWER_MAX,
 } WIFI_POWER_ENUM;
+
+#define PROTOCOL_DEFAULT  WIRELESS_PROTOCOL
+#define G_PROTOCOL_STR  "protocol"
+int g_protocol;
 
 #define BAUDRATE_DEFAULT  115200
 #define WIFICHANNEL_DEFAULT  6
@@ -229,7 +238,13 @@ void setup()
     preferences.begin("setup", false);     
     delay(500);
      
-    // Preferences 
+    // Preferences
+    g_protocol = preferences.getInt(G_PROTOCOL_STR, 255); // 155 indicates not available
+    if (g_protocol != WIRELESS_PROTOCOL_TCP && g_protocol != WIRELESS_PROTOCOL_UDP && g_protocol != WIRELESS_PROTOCOL_BT) { // not a valid value
+        g_protocol = PROTOCOL_DEFAULT;
+        preferences.putInt(G_PROTOCOL_STR, g_protocol);
+    }
+
     g_baudrate = preferences.getInt(G_BAUDRATE_STR, 0); // 0 indicates not available
     if (g_baudrate != 9600 && g_baudrate != 19200 && g_baudrate != 38400 &&
         g_baudrate != 57600 && g_baudrate != 115200 && g_baudrate != 230400) { // not a valid value
@@ -271,17 +286,14 @@ void setup()
     at_mode.Init(GPIO0_IO);
 #endif
 
-#if (WIRELESS_PROTOCOL <= 1)
+#if (WIRELESS_PROTOCOL != 2)
+if (g_protocol == WIRELESS_PROTOCOL_TCP || g_protocol == WIRELESS_PROTOCOL_UDP) {
 //-- WiFi TCP, UDP
 
     // AP mode
     WiFi.mode(WIFI_AP); // seems not to be needed, done by WiFi.softAP()?
     WiFi.softAPConfig(ip, ip_gateway, netmask);
-  #if (WIRELESS_PROTOCOL == 1)
-    String ssid_full = ssid + " UDP";
-  #else
-    String ssid_full = ssid + " TCP";
-  #endif
+    String ssid_full = (g_protocol == WIRELESS_PROTOCOL_UDP) ? ssid + " UDP" : ssid + " TCP";
     WiFi.softAP(ssid_full.c_str(), (password.length()) ? password.c_str() : NULL, g_wifichannel); // channel = 1 is default
     DBG_PRINT("ap ip address: ");
     DBG_PRINTLN(WiFi.softAPIP()); // comes out as 192.168.4.1
@@ -289,12 +301,19 @@ void setup()
     DBG_PRINTLN(WiFi.channel());
 
     setup_wifipower();
-  #if (WIRELESS_PROTOCOL == 1)
-    udp.begin(port_udp);
-  #else
-    server.begin();
-    server.setNoDelay(true);
-  #endif    
+    if (g_protocol <= WIRELESS_PROTOCOL_UDP) {
+        udp.begin(port_udp);
+    } else {
+        server.begin();
+        server.setNoDelay(true);
+    }
+
+} else
+if (g_protocol == WIRELESS_PROTOCOL_BT) {
+//-- Bluetooth
+
+    SerialBT.begin(bluetooth_device_name);
+}
 
 #elif (WIRELESS_PROTOCOL == 2)
 //-- Wifi UDPCl
@@ -319,12 +338,7 @@ void setup()
     setup_wifipower();
     udp.begin(port_udpcl);
 
-#elif (WIRELESS_PROTOCOL == 3)
-//-- Bluetooth
-
-    SerialBT.begin(bluetooth_device_name);
-
-#endif
+#endif // (WIRELESS_PROTOCOL == 2)
 
     led_tlast_ms = 0;
     led_state = false;
@@ -360,7 +374,8 @@ void loop()
 
     uint8_t buf[256]; // working buffer
 
-#if (WIRELESS_PROTOCOL == 0)
+#if (WIRELESS_PROTOCOL != 2)
+if (g_protocol == WIRELESS_PROTOCOL_TCP) {
 //-- WiFi TCP
 
     if (server.hasClient()) {
@@ -402,7 +417,8 @@ void loop()
         client.write(buf, len);
     }
 
-#elif (WIRELESS_PROTOCOL == 1)
+} else
+if (g_protocol == WIRELESS_PROTOCOL_UDP) {
 //-- WiFi UDP
 
     int packetSize = udp.parsePacket();
@@ -426,6 +442,33 @@ void loop()
         udp.write(buf, len);
         udp.endPacket();
     }
+
+} else
+if (g_protocol == WIRELESS_PROTOCOL_BT) {
+//-- Bluetooth
+
+    int len = SerialBT.available();
+    if (len > 0) {
+        if (len > sizeof(buf)) len = sizeof(buf);
+        for (int i = 0; i < len; i++) buf[i] = SerialBT.read();
+        SERIAL.write(buf, len);
+        is_connected = true;
+        is_connected_tlast_ms = millis();
+    }
+
+    tnow_ms = millis(); // may not be relevant, but just update it
+    int avail = SERIAL.available();
+    if (avail <= 0) {
+        serial_data_received_tfirst_ms = tnow_ms;
+    } else
+    if ((tnow_ms - serial_data_received_tfirst_ms) > 10 || avail > 128) { // 10 ms at 57600 bps corresponds to 57 bytes, no chance for 128 bytes
+        serial_data_received_tfirst_ms = tnow_ms;
+
+        int len = SERIAL.read(buf, sizeof(buf));
+        SerialBT.write(buf, len);
+    }
+
+}
 
 #elif (WIRELESS_PROTOCOL == 2)
 //-- WiFi UDPCl (STA mode)
@@ -458,30 +501,6 @@ void loop()
         udp.endPacket();
     }
 
-#elif (WIRELESS_PROTOCOL == 3)
-//-- Bluetooth
-
-    int len = SerialBT.available();
-    if (len > 0) {
-        if (len > sizeof(buf)) len = sizeof(buf);
-        for (int i = 0; i < len; i++) buf[i] = SerialBT.read();
-        SERIAL.write(buf, len);
-        is_connected = true;
-        is_connected_tlast_ms = millis();
-    }
-
-    tnow_ms = millis(); // may not be relevant, but just update it
-    int avail = SERIAL.available();
-    if (avail <= 0) {
-        serial_data_received_tfirst_ms = tnow_ms;
-    } else
-    if ((tnow_ms - serial_data_received_tfirst_ms) > 10 || avail > 128) { // 10 ms at 57600 bps corresponds to 57 bytes, no chance for 128 bytes
-        serial_data_received_tfirst_ms = tnow_ms;
-
-        int len = SERIAL.read(buf, sizeof(buf));
-        SerialBT.write(buf, len);
-    }
-
-#endif // (WIRELESS_PROTOCOL == 3)
+#endif // (WIRELESS_PROTOCOL == 2)
 }
 

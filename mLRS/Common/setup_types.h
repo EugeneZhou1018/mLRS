@@ -190,6 +190,14 @@ typedef enum {
 
 
 typedef enum {
+    WIFI_PROTOCOL_TCP = 0,
+    WIFI_PROTOCOL_UDP,
+    WIFI_PROTOCOL_BT,
+    WIFI_PROTOCOL_NUM,
+} TX_WIFI_PROTOCOL_ENUM;
+
+
+typedef enum {
     WIFI_CHANNEL_1 = 0,
     WIFI_CHANNEL_6,
     WIFI_CHANNEL_11,
@@ -308,10 +316,11 @@ typedef struct
     uint8_t Buzzer;
     uint8_t CliLineEnd;
     uint8_t MavlinkComponent;
+    uint8_t WifiProtocol;
     uint8_t WifiChannel;
     uint8_t WifiPower;
 
-    uint8_t spare[6];
+    uint8_t spare[5];
 } tTxSetup; // 20 bytes
 
 

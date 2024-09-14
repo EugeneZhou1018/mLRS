@@ -99,6 +99,7 @@
   X( Setup.Tx[0].CliLineEnd,        LIST, "Tx Cli LineEnd",   "TX_CLI_LINEEND",   0,0,0,"", "CRLF,LF,CR", MSK_ALL )
 
 #define SETUP_PARAMETER_LIST_TX_ESP \
+  X( Setup.Tx[0].WifiProtocol,      LIST, "Tx Wifi Protocol", "TX_WIFI_PROT",     0,0,0,"", "TCP,UDP,BT", MSK_ALL )\
   X( Setup.Tx[0].WifiChannel,       LIST, "Tx Wifi Channel",  "TX_WIFI_CHANNEL",  0,0,0,"", "1,6,11,13", MSK_ALL )\
   X( Setup.Tx[0].WifiPower,         LIST, "Tx Wifi Power",    "TX_WIFI_POWER",    0,0,0,"", "low,med,max", MSK_ALL )
 

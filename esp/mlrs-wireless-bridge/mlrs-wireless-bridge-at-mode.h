@@ -32,6 +32,10 @@ typedef enum {
     AT_WIFIPOWER_0_LOW,
     AT_WIFIPOWER_1_MED,
     AT_WIFIPOWER_2_MAX,
+    AT_PROTOCOL_QUERY,
+    AT_PROTOCOL_0_TCP,
+    AT_PROTOCOL_1_UDP,
+    AT_PROTOCOL_3_BT,
     AT_CMDS_NUM,
 } AT_NAME_ENUM;
 
@@ -54,6 +58,10 @@ const char* at_cmds[AT_CMDS_NUM] = {
      "AT+WIFIPOWER=0",
      "AT+WIFIPOWER=1",
      "AT+WIFIPOWER=2",
+     "AT+PROTOCOL=?",
+     "AT+PROTOCOL=0",
+     "AT+PROTOCOL=1",
+     "AT+PROTOCOL=3",
 };
 
 
@@ -119,7 +127,8 @@ bool AtMode::Do(void)
             if (strncmp((char*)at_buf, at_cmds[i], at_pos) != 0) continue; // not even a possible match
             possible_match = true;
             if (strcmp((char*)at_buf, at_cmds[i]) == 0) { // full match
-                if (i == AT_NAME_QUERY || i == AT_BAUD_QUERY || i == AT_WIFICHANNEL_QUERY || i == AT_WIFIPOWER_QUERY) {
+                if (i == AT_NAME_QUERY || i == AT_BAUD_QUERY || i == AT_WIFICHANNEL_QUERY || 
+                    i == AT_WIFIPOWER_QUERY || i == AT_PROTOCOL_QUERY) {
                     at_buf[0] = 'O';
                     at_buf[1] = 'K';
                     SERIAL.write(at_buf, at_pos - 1); // don't send the '?'
@@ -128,6 +137,7 @@ bool AtMode::Do(void)
                         case AT_BAUD_QUERY: SERIAL.print(g_baudrate); break;
                         case AT_WIFICHANNEL_QUERY: SERIAL.print(g_wifichannel); break;
                         case AT_WIFIPOWER_QUERY: SERIAL.print(g_wifipower); break;
+                        case AT_PROTOCOL_QUERY: SERIAL.print(g_protocol); break;
                     }
                     SERIAL.write("\r\n");
                 } else
@@ -175,6 +185,17 @@ bool AtMode::Do(void)
                     int new_wifipower = atoi((char*)(at_buf + 13)); // AT+WIFIPOWER=1
                     if (new_wifipower != g_wifipower) {
                         preferences.putInt(G_WIFIPOWER_STR, new_wifipower);
+                        restart_needed = true;
+                    }
+                } else
+                if (i == AT_PROTOCOL_0_TCP || i == AT_PROTOCOL_1_UDP || i == AT_PROTOCOL_3_BT) {
+                    at_buf[0] = 'O';
+                    at_buf[1] = 'K';
+                    SERIAL.write(at_buf, at_pos);
+                    SERIAL.write("\r\n");
+                    int new_protocol = atoi((char*)(at_buf + 12)); // AT+PROTOCOL=1
+                    if (new_protocol != g_protocol) {
+                        preferences.putInt(G_PROTOCOL_STR, new_protocol);
                         restart_needed = true;
                     }
                 }

@@ -78,6 +78,7 @@ class tTxEspWifiBridge
     void run_autoconfigure(void);
     bool esp_read(const char* const cmd, uint8_t* const res, uint8_t* const len);
     void esp_configure_baudrate(void);
+    void esp_configure_wifiprotocol(void);
     void esp_configure_wifichannel(void);
     void esp_configure_wifipower(void);
 
@@ -282,7 +283,7 @@ void tTxEspWifiBridge::passthrough_do(void)
 }
 
 
-#define ESP_DBG(x)
+#define ESP_DBG(x) x
 
 #define ESP_CMDRES_LEN      46
 #define ESP_CMDRES_TMO_MS   50
@@ -324,6 +325,30 @@ char cmd_str[32];
     strcpy(cmd_str, "AT+BAUD=");
     strcat(cmd_str, baud_str);
     if (!esp_read(cmd_str, s, &len)) { // AT+BAUD sends response with "old" baud rate, when stores it, but does NOT change it
+        return;
+    }
+
+    // wait for save on esp to finish
+    delay_ms(100);
+}
+
+
+void tTxEspWifiBridge::esp_configure_wifiprotocol(void)
+{
+uint8_t s[ESP_CMDRES_LEN+2];
+uint8_t len;
+char cmd_str[32];
+
+    strcpy(cmd_str, "AT+PROTOCOL=");
+    switch (tx_setup->WifiProtocol) {
+        case WIFI_PROTOCOL_TCP: strcat(cmd_str, "0"); break;
+        case WIFI_PROTOCOL_UDP: strcat(cmd_str, "1"); break;
+        case WIFI_PROTOCOL_BT: strcat(cmd_str, "3"); break;
+        default:
+            strcat(cmd_str, "3"); // should not happen
+    }
+
+    if (!esp_read(cmd_str, s, &len)) {
         return;
     }
 
@@ -415,6 +440,7 @@ uint8_t len;
     if (found) {
 ESP_DBG(
 esp_read("AT+BAUD=?", s, &len);
+esp_read("AT+PROTOCOL=?", s, &len);
 esp_read("AT+WIFICHANNEL=?", s, &len);
 esp_read("AT+WIFIPOWER=?", s, &len);)
 
@@ -422,6 +448,7 @@ esp_read("AT+WIFIPOWER=?", s, &len);)
             esp_configure_baudrate();
         }
 
+        esp_configure_wifiprotocol();
         esp_configure_wifichannel();
         esp_configure_wifipower();
 
