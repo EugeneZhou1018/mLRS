@@ -77,6 +77,8 @@ class AtMode {
     bool at_is_active = false;
 
     bool restart_needed;
+
+    void restart(void);
 };
 
 
@@ -150,7 +152,7 @@ bool AtMode::Do(void)
                         SERIAL.write(at_buf, at_pos);
                         SERIAL.write("\r\n");
                         delay(100);
-                        ESP.restart();
+                        restart();
                     } else {
                         SERIAL.write("KO\r\n"); // cmd recognized, but not executed
                     }
@@ -210,6 +212,33 @@ bool AtMode::Do(void)
     } // avail
 
     return true;
+}
+
+
+void AtMode::restart(void)
+{
+    preferences.end();    
+
+#if (WIRELESS_PROTOCOL != 2)
+if (g_protocol == WIRELESS_PROTOCOL_TCP || g_protocol == WIRELESS_PROTOCOL_UDP) {
+    WiFi.disconnect();
+    // ?? WiFi.end();
+     if (g_protocol == WIRELESS_PROTOCOL_UDP) {
+        udp.stop();
+    } else {
+        server.end();
+    }
+} else
+if (g_protocol == WIRELESS_PROTOCOL_BT) {
+    SerialBT.end();
+}
+#elif (WIRELESS_PROTOCOL == 2)
+    WiFi.disconnect();
+    //?? WiFi.end();
+    udp.stop();
+#endif
+
+    ESP.restart();
 }
 
 

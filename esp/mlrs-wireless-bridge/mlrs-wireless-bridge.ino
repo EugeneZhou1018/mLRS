@@ -301,7 +301,7 @@ if (g_protocol == WIRELESS_PROTOCOL_TCP || g_protocol == WIRELESS_PROTOCOL_UDP) 
     DBG_PRINTLN(WiFi.channel());
 
     setup_wifipower();
-    if (g_protocol <= WIRELESS_PROTOCOL_UDP) {
+    if (g_protocol == WIRELESS_PROTOCOL_UDP) {
         udp.begin(port_udp);
     } else {
         server.begin();
