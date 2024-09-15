@@ -7,7 +7,7 @@
 // Basic but effective & reliable transparent WiFi or Bluetooth <-> serial bridge.
 // Minimizes wireless traffic while respecting latency by better packeting algorithm.
 //*******************************************************
-// 13. Sep. 2023
+// 15. Sep. 2023
 //*********************************************************/
 // inspired by examples from Arduino
 // ArduinoIDE 2.0.3, esp32 by Espressif Systems 2.0.6
@@ -37,6 +37,13 @@ List of supported modules, and board which needs to be selected
 
 // ATTENTION:
 // One may have to choose Partition Scheme = "No OTA (Large App)" !!
+
+
+// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+// !!!!!  A T T E N T I O N  !!!!!   
+// crashes for BT
+// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 
 //-------------------------------------------------------
 // User configuration
