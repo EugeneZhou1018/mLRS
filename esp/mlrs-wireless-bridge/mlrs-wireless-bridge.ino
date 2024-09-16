@@ -7,7 +7,7 @@
 // Basic but effective & reliable transparent WiFi or Bluetooth <-> serial bridge.
 // Minimizes wireless traffic while respecting latency by better packeting algorithm.
 //*******************************************************
-// 15. Sep. 2023
+// 16. Sep. 2024
 //*********************************************************/
 // inspired by examples from Arduino
 // ArduinoIDE 2.0.3, esp32 by Espressif Systems 2.0.6
@@ -35,16 +35,6 @@ List of supported modules, and board which needs to be selected
 - M5Stack ATOM Lite               board: M5Stack-ATOM
 */
 
-// ATTENTION:
-// One may have to choose Partition Scheme = "No OTA (Large App)" !!
-
-
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-// !!!!!  A T T E N T I O N  !!!!!   
-// crashes for BT
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-
 //-------------------------------------------------------
 // User configuration
 //-------------------------------------------------------
@@ -71,7 +61,7 @@ List of supported modules, and board which needs to be selected
 
 // Wireless protocol
 // 0 = WiFi TCP, 1 = WiFi UDP, 2 = Wifi UDPCl, 3 = Bluetooth (not available for all boards)
-#define WIRELESS_PROTOCOL  1
+#define WIRELESS_PROTOCOL  3
 
 // GPIO0 usage
 // uncomment, if your Tx module supports the RESET and GPIO0 lines on the EPS32
@@ -82,7 +72,7 @@ List of supported modules, and board which needs to be selected
 //**********************//
 //*** WiFi settings ***//
 
-// for TCP, UDP (only for these)
+// for TCP, UDP (only for these two)
 String ssid = "mLRS AP"; // Wifi name
 String password = ""; // "thisisgreat"; // WiFi password, "" makes it an open AP
 
@@ -91,7 +81,7 @@ IPAddress ip(192, 168, 4, 55); // connect to this IP // MissionPlanner default i
 int port_tcp = 5760; // connect to this port per TCP // MissionPlanner default is 5760
 int port_udp = 14550; // connect to this port per UDP // MissionPlanner default is 14550
 
-// for UDPCl (only for it)
+// for UDPCl (only for UDPCl)
 String network_ssid = "****"; // name of your WiFi network
 String network_password = "****"; // password to access your WiFi network
 
@@ -99,7 +89,7 @@ IPAddress ip_udpcl(192, 168, 0, 164); // connect to this IP // MissionPlanner de
 
 int port_udpcl = 14550; // connect to this port per UDPCL // MissionPlanner default is 14550
 
-// WiFi power
+// WiFi power (for all TCP, UDP, UDPCl)
 // comment out for default setting
 // Note: In order to find the possible options, right click on WIFI_POWER_19_5dBm and choose "Go To Definiton"
 #define WIFI_POWER_MEDIUM  WIFI_POWER_2dBm // WIFI_POWER_MINUS_1dBm is the lowest possible, WIFI_POWER_19_5dBm is the max
@@ -185,13 +175,12 @@ typedef enum {
 } WIFI_POWER_ENUM;
 
 #define PROTOCOL_DEFAULT  WIRELESS_PROTOCOL
-#define G_PROTOCOL_STR  "protocol"
-int g_protocol;
-
 #define BAUDRATE_DEFAULT  115200
 #define WIFICHANNEL_DEFAULT  6
 #define WIFIPOWER_DEFAULT  WIFI_POWER_MED
 
+#define G_PROTOCOL_STR  "protocol"
+int g_protocol;
 #define G_BAUDRATE_STR  "baudrate"
 int g_baudrate;
 #define G_WIFICHANNEL_STR  "wifichannel"
@@ -206,6 +195,8 @@ Preferences preferences;
 AtMode at_mode;
 #endif
 
+bool wifi_initialized;
+unsigned long startup_tmo_ms;
 bool led_state;
 unsigned long led_tlast_ms;
 bool is_connected;
@@ -238,13 +229,71 @@ void setup_wifipower()
 }
 
 
+void setup_wifi()
+{
+#if (WIRELESS_PROTOCOL != 2)
+if (g_protocol == WIRELESS_PROTOCOL_TCP || g_protocol == WIRELESS_PROTOCOL_UDP) {
+//-- WiFi TCP, UDP
+
+    // AP mode
+    WiFi.mode(WIFI_AP); // seems not to be needed, done by WiFi.softAP()?
+    WiFi.softAPConfig(ip, ip_gateway, netmask);
+    String ssid_full = (g_protocol == WIRELESS_PROTOCOL_UDP) ? ssid + " UDP" : ssid + " TCP";
+    WiFi.softAP(ssid_full.c_str(), (password.length()) ? password.c_str() : NULL, g_wifichannel); // channel = 1 is default
+    DBG_PRINT("ap ip address: ");
+    DBG_PRINTLN(WiFi.softAPIP()); // comes out as 192.168.4.1
+    DBG_PRINT("channel: ");
+    DBG_PRINTLN(WiFi.channel());
+
+    setup_wifipower();
+  #if (WIRELESS_PROTOCOL == 1)
+    udp.begin(port_udp);
+  #else
+    server.begin();
+    server.setNoDelay(true);
+  #endif    
+
+}else
+if (g_protocol == WIRELESS_PROTOCOL_BT) {
+//-- Bluetooth
+
+    SerialBT.begin(bluetooth_device_name);
+}
+
+#elif (WIRELESS_PROTOCOL == 2)
+//-- Wifi UDPCl
+
+    // STA mode
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    WiFi.config(ip_udpcl, ip_gateway, netmask);
+    WiFi.begin(network_ssid.c_str(), network_password.c_str());
+
+    while (WiFi.status() != WL_CONNECTED) {
+        //delay(500);
+        led_on(true); delay(75); led_off(); delay(75); 
+        led_on(true); delay(75); led_off(); delay(75); 
+        led_on(true); delay(75); led_off(); delay(75); 
+        DBG_PRINTLN("connecting to WiFi network...");
+    }
+    DBG_PRINTLN("connected");
+    DBG_PRINT("network ip address: ");
+    DBG_PRINTLN(WiFi.localIP());
+
+    setup_wifipower();
+    udp.begin(port_udpcl);
+
+#endif // (WIRELESS_PROTOCOL == 2)
+}
+
+
 void setup()
 {
     led_init();
     dbg_init();
     preferences.begin("setup", false);     
-    delay(500);
-     
+    //delay(500); // we delay for 750 ms anyway
+
     // Preferences
     g_protocol = preferences.getInt(G_PROTOCOL_STR, 255); // 155 indicates not available
     if (g_protocol != WIRELESS_PROTOCOL_TCP && g_protocol != WIRELESS_PROTOCOL_UDP && g_protocol != WIRELESS_PROTOCOL_BT) { // not a valid value
@@ -293,59 +342,8 @@ void setup()
     at_mode.Init(GPIO0_IO);
 #endif
 
-#if (WIRELESS_PROTOCOL != 2)
-if (g_protocol == WIRELESS_PROTOCOL_TCP || g_protocol == WIRELESS_PROTOCOL_UDP) {
-//-- WiFi TCP, UDP
-
-    // AP mode
-    WiFi.mode(WIFI_AP); // seems not to be needed, done by WiFi.softAP()?
-    WiFi.softAPConfig(ip, ip_gateway, netmask);
-    String ssid_full = (g_protocol == WIRELESS_PROTOCOL_UDP) ? ssid + " UDP" : ssid + " TCP";
-    WiFi.softAP(ssid_full.c_str(), (password.length()) ? password.c_str() : NULL, g_wifichannel); // channel = 1 is default
-    DBG_PRINT("ap ip address: ");
-    DBG_PRINTLN(WiFi.softAPIP()); // comes out as 192.168.4.1
-    DBG_PRINT("channel: ");
-    DBG_PRINTLN(WiFi.channel());
-
-    setup_wifipower();
-    if (g_protocol == WIRELESS_PROTOCOL_UDP) {
-        udp.begin(port_udp);
-    } else {
-        server.begin();
-        server.setNoDelay(true);
-    }
-
-} else
-if (g_protocol == WIRELESS_PROTOCOL_BT) {
-//-- Bluetooth
-
-    SerialBT.begin(bluetooth_device_name);
-}
-
-#elif (WIRELESS_PROTOCOL == 2)
-//-- Wifi UDPCl
-
-    // STA mode
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
-    WiFi.config(ip_udpcl, ip_gateway, netmask);
-    WiFi.begin(network_ssid.c_str(), network_password.c_str());
-
-    while (WiFi.status() != WL_CONNECTED) {
-        //delay(500);
-        led_on(true); delay(75); led_off(); delay(75); 
-        led_on(true); delay(75); led_off(); delay(75); 
-        led_on(true); delay(75); led_off(); delay(75); 
-        DBG_PRINTLN("connecting to WiFi network...");
-    }
-    DBG_PRINTLN("connected");
-    DBG_PRINT("network ip address: ");
-    DBG_PRINTLN(WiFi.localIP());
-
-    setup_wifipower();
-    udp.begin(port_udpcl);
-
-#endif // (WIRELESS_PROTOCOL == 2)
+    wifi_initialized = false; // setup_wifi();
+    startup_tmo_ms = 750 + millis();
 
     led_tlast_ms = 0;
     led_state = false;
@@ -363,8 +361,11 @@ void loop()
 {
 #ifdef GPIO0_IO
     if (at_mode.Do()) return;
+    if (startup_tmo_ms) {
+        if (millis() > startup_tmo_ms) startup_tmo_ms = 0;
+        return;
+    } 
 #endif
-
     unsigned long tnow_ms = millis();
 
     if (is_connected && (tnow_ms - is_connected_tlast_ms > 2000)) { // nothing from GCS for 2 secs
@@ -380,6 +381,12 @@ void loop()
     //-- here comes the core code, handle WiFi or Bluetooth connection and do the bridge
 
     uint8_t buf[256]; // working buffer
+
+    if (!wifi_initialized) {
+        wifi_initialized = true;
+        setup_wifi();
+        return;
+    }
 
 #if (WIRELESS_PROTOCOL != 2)
 if (g_protocol == WIRELESS_PROTOCOL_TCP) {

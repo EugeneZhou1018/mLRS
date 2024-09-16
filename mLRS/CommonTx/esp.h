@@ -283,7 +283,7 @@ void tTxEspWifiBridge::passthrough_do(void)
 }
 
 
-#define ESP_DBG(x) x
+#define ESP_DBG(x)
 
 #define ESP_CMDRES_LEN      46
 #define ESP_CMDRES_TMO_MS   50
@@ -424,18 +424,21 @@ uint8_t len;
 
     uint32_t bauds[7] = { ser_baud, 9600, 19200, 38400, 57600, 115200, 230400 };
     uint8_t baud_idx = 0;
+for (uint8_t cc = 0; cc < 3; cc++) { // when in BT it seems to need f-ing long to start up
     for (baud_idx = 0; baud_idx < sizeof(bauds)/4; baud_idx++) {
         ser->SetBaudRate(bauds[baud_idx]);
         ser->flush();
 
-        if (esp_read("AT+NAME=?", s, &len)) { // found !
+        if (esp_read("AT+NAME=?", s, &len)) { // detected !
             s[len-2] = '\0';
             if (!strcmp((char*)s, "OK+NAME=ESP-mLRS-Wireless-Bridge")) { // correct name, it's her we are looking for
                 found = true;
             }
+            cc = 128; // break also higher for loop, don't do 255 LOL
             break;
         }
     }
+}
 
     if (found) {
 ESP_DBG(
@@ -463,7 +466,8 @@ esp_read("AT+WIFIPOWER=?", s, &len);)
     }
     ser->flush();
 
-ESP_DBG(if (esp_read("AT+NAME=?", s, &len)) { dbg.puts("!ALL GOOD!\r\n"); } else { dbg.puts("!F IT!\r\n"); })
+//ESP_DBG(if (esp_read("AT+NAME=?", s, &len)) { dbg.puts("!ALL GOOD!\r\n"); } else { dbg.puts("!F IT!\r\n"); })
+if (esp_read("AT+NAME=?", s, &len)) { dbg.puts("!ALL GOOD!\r\n"); } else { dbg.puts("!F IT!\r\n"); }
 
     esp_gpio0_high(); // leave forced AT mode
 #endif

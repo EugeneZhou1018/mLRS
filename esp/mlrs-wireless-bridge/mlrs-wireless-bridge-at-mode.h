@@ -9,7 +9,6 @@
 
 
 // forward declarations
-void setup_serial(int _baudrate);
 void serialFlushRx(void);
 
 
@@ -218,26 +217,6 @@ bool AtMode::Do(void)
 void AtMode::restart(void)
 {
     preferences.end();    
-
-#if (WIRELESS_PROTOCOL != 2)
-if (g_protocol == WIRELESS_PROTOCOL_TCP || g_protocol == WIRELESS_PROTOCOL_UDP) {
-    WiFi.disconnect();
-    // ?? WiFi.end();
-     if (g_protocol == WIRELESS_PROTOCOL_UDP) {
-        udp.stop();
-    } else {
-        server.end();
-    }
-} else
-if (g_protocol == WIRELESS_PROTOCOL_BT) {
-    SerialBT.end();
-}
-#elif (WIRELESS_PROTOCOL == 2)
-    WiFi.disconnect();
-    //?? WiFi.end();
-    udp.stop();
-#endif
-
     ESP.restart();
 }
 
