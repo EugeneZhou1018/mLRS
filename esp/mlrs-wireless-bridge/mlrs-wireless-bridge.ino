@@ -48,7 +48,7 @@ List of supported modules, and board which needs to be selected
 //#define MODULE_NODEMCU_ESP32_WROOM32
 //#define MODULE_ESP32_PICO_KIT
 //#define MODULE_ADAFRUIT_QT_PY_ESP32_S2
-//#define MODULE_TTGO_MICRO32
+#define MODULE_TTGO_MICRO32
 //#define MODULE_M5STAMP_C3_MATE
 //#define MODULE_M5STAMP_C3U_MATE
 //#define MODULE_M5STAMP_C3U_MATE_FOR_FRSKY_R9M // uses inverted serial
@@ -66,7 +66,7 @@ List of supported modules, and board which needs to be selected
 #define WIRELESS_PROTOCOL  3
 
 // GPIO0 usage
-// uncomment, if your Tx module supports the RESET and GPIO0 lines on the EPS32
+// comment out, if your Tx module DOES NOT supports the RESET and GPIO0 lines on the EPS32
 // the number determines the IO pin, usally it is 0
 #define GPIO0_IO  0
 
@@ -91,6 +91,11 @@ IPAddress ip_udpcl(192, 168, 0, 164); // connect to this IP // MissionPlanner de
 
 int port_udpcl = 14550; // connect to this port per UDPCL // MissionPlanner default is 14550
 
+// WiFi channel
+// choose 1, 6, 11, 13. Channel 13 (2461-2483 MHz) has the least overlap with mLRS 2.4 GHz frequencies.
+// Note: Channel 13 is generally not available in the US, where 11 is the maximum.
+#define WIFI_CHANNEL  6
+
 // WiFi power (for all TCP, UDP, UDPCl)
 // comment out for default setting
 // Note: In order to find the possible options, right click on WIFI_POWER_19_5dBm and choose "Go To Definiton"
@@ -105,6 +110,9 @@ String bluetooth_device_name = "mLRS BT"; // Bluetooth device name
 
 //************************//
 //*** General settings ***//
+
+// Baudrate
+#define BAUD_RATE  115200
 
 // Serial port usage (only effective for the generic module)
 // comment all for default behavior, which is using only Serial port
@@ -177,18 +185,18 @@ typedef enum {
 } WIFI_POWER_ENUM;
 
 #define PROTOCOL_DEFAULT  WIRELESS_PROTOCOL
-#define BAUDRATE_DEFAULT  115200
-#define WIFICHANNEL_DEFAULT  6
+#define BAUDRATE_DEFAULT  BAUD_RATE
+#define WIFICHANNEL_DEFAULT  WIFI_CHANNEL
 #define WIFIPOWER_DEFAULT  WIFI_POWER_MED
 
 #define G_PROTOCOL_STR  "protocol"
-int g_protocol;
+int g_protocol = PROTOCOL_DEFAULT;
 #define G_BAUDRATE_STR  "baudrate"
-int g_baudrate;
+int g_baudrate = BAUDRATE_DEFAULT;
 #define G_WIFICHANNEL_STR  "wifichannel"
-int g_wifichannel;
+int g_wifichannel = WIFICHANNEL_DEFAULT;
 #define G_WIFIPOWER_STR  "wifipower"
-int g_wifipower;
+int g_wifipower = WIFIPOWER_DEFAULT;
 
 #ifdef GPIO0_IO
 #include <Preferences.h>
@@ -293,10 +301,12 @@ void setup()
 {
     led_init();
     dbg_init();
-    preferences.begin("setup", false);     
     //delay(500); // we delay for 750 ms anyway
 
     // Preferences
+#ifdef GPIO0_IO
+    preferences.begin("setup", false);     
+
     g_protocol = preferences.getInt(G_PROTOCOL_STR, 255); // 155 indicates not available
     if (g_protocol != WIRELESS_PROTOCOL_TCP && g_protocol != WIRELESS_PROTOCOL_UDP && g_protocol != WIRELESS_PROTOCOL_BT) { // not a valid value
         g_protocol = PROTOCOL_DEFAULT;
@@ -321,6 +331,7 @@ void setup()
         g_wifipower = WIFIPOWER_DEFAULT;
         preferences.putInt(G_WIFIPOWER_STR, g_wifipower);
     }
+#endif    
 
     // Serial 
     size_t rxbufsize = SERIAL.setRxBufferSize(2*1024); // must come before uart started, retuns 0 if it fails
