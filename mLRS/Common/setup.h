@@ -379,9 +379,9 @@ void setup_sanitize_config(uint8_t config_id)
     SANITIZE(Tx[config_id].WifiChannel, WIFI_CHANNEL_NUM, WIFI_CHANNEL_6, WIFI_CHANNEL_6);
     SANITIZE(Tx[config_id].WifiPower, WIFI_POWER_NUM, WIFI_POWER_MED, WIFI_POWER_MED);
 #else
-    Tx[config_id].WifiProtocol = WIFI_PROTOCOL_UDP; // force them to default
-    Tx[config_id].WifiChannel = WIFI_CHANNEL_6;
-    Tx[config_id].WifiPower = WIFI_POWER_MED;
+    Setup.Tx[config_id].WifiProtocol = WIFI_PROTOCOL_UDP; // force them to default
+    Setup.Tx[config_id].WifiChannel = WIFI_CHANNEL_6;
+    Setup.Tx[config_id].WifiPower = WIFI_POWER_MED;
 #endif
 
     //-- Rx:
