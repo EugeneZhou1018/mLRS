@@ -7,11 +7,13 @@
 // Basic but effective & reliable transparent WiFi or Bluetooth <-> serial bridge.
 // Minimizes wireless traffic while respecting latency by better packeting algorithm.
 //*******************************************************
-// 16. Sep. 2024
+// 17. Sep. 2024
 //*********************************************************/
 // inspired by examples from Arduino
-// ArduinoIDE 2.0.3, esp32 by Espressif Systems 2.0.6
-// use upload speed 115200 if serial passthrough shall be used for flashing
+// NOTES:
+// Partition Scheme needs to be changed to "No OTA (Large App)"
+// Use upload speed 115200 if serial passthrough shall be used for flashing
+// ArduinoIDE 2.3.2, esp32 by Espressif Systems 3.0.4
 // this can be useful: https://github.com/espressif/arduino-esp32/blob/master/libraries
 /*
 Definitions:
@@ -224,7 +226,7 @@ void setup_wifipower()
 #else
         case WIFI_POWER_MED: WiFi.setTxPower(WIFI_POWER_5dBm); break;
 #endif        
-        case WIFI_POWER_MAX: WiFi.setTxPower(WIFI_POWER_21dBm); break;
+        case WIFI_POWER_MAX: WiFi.setTxPower(WIFI_POWER_19_5dBm); break;
     }
 }
 
