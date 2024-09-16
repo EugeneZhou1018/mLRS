@@ -174,7 +174,14 @@ void tTxEspWifiBridge::Do(void)
 uint8_t tTxEspWifiBridge::read_dtr_rts(void)
 {
 #if defined USE_ESP_WIFI_BRIDGE_RST_GPIO0 && defined USE_ESP_WIFI_BRIDGE_DTR_RTS
+#if defined DEVICE_HAS_COM_ON_USB
+    uint8_t dtr_rts = 0;
+    if (usb_dtr_is_set()) dtr_rts |= DTR_SET;
+    if (usb_rts_is_set()) dtr_rts |= RTS_SET;
+    return dtr_rts;
+#else
     return esp_dtr_rts(); // 0x01: dtr is set, 0x02: rts is set
+#endif
 #else
     return 0;
 #endif
