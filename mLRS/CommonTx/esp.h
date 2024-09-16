@@ -34,7 +34,7 @@ void esp_enable(uint8_t serial_destination)
     } else {
         esp_reset_low(); // hold it in reset, should be already so but ensure it
     }
-#endif
+#endif // USE_ESP_WIFI_BRIDGE_RST_GPIO0
 }
 
 
@@ -75,12 +75,20 @@ class tTxEspWifiBridge
     void EnterPassthrough(void);
 
   private:
-    void run_autoconfigure(void);
+#ifdef USE_ESP_WIFI_BRIDGE_RST_GPIO0
     bool esp_read(const char* const cmd, uint8_t* const res, uint8_t* const len);
     void esp_configure_baudrate(void);
     void esp_configure_wifiprotocol(void);
     void esp_configure_wifichannel(void);
     void esp_configure_wifipower(void);
+#endif
+    void run_autoconfigure(void);
+
+    typedef enum {
+        DTR_SET = 0x01,
+        RTS_SET = 0x02,
+    } DTR_RTS_ENUM;
+    uint8_t read_dtr_rts(void);
 
     void passthrough_do_rts_cts(void);
     void passthrough_do(void);
@@ -145,9 +153,9 @@ void tTxEspWifiBridge::Do(void)
 #if defined USE_ESP_WIFI_BRIDGE_RST_GPIO0 && defined USE_ESP_WIFI_BRIDGE_DTR_RTS
     if (!initialized) return;
 
-    uint8_t dtr_rts = esp_dtr_rts();
+    uint8_t dtr_rts = read_dtr_rts();
 
-    if ((dtr_rts_last == 3) && !(dtr_rts & 0x02)) {
+    if ((dtr_rts_last == (DTR_SET | RTS_SET)) && !(dtr_rts & RTS_SET)) { // RTS toggled to low while DTR high
 
         //dbg.puts("\npst");
 
@@ -159,6 +167,16 @@ void tTxEspWifiBridge::Do(void)
     }
 
     dtr_rts_last = dtr_rts;
+#endif // USE_ESP_WIFI_BRIDGE_RST_GPIO0 && USE_ESP_WIFI_BRIDGE_DTR_RTS
+}
+
+
+uint8_t tTxEspWifiBridge::read_dtr_rts(void)
+{
+#if defined USE_ESP_WIFI_BRIDGE_RST_GPIO0 && defined USE_ESP_WIFI_BRIDGE_DTR_RTS
+    return esp_dtr_rts(); // 0x01: dtr is set, 0x02: rts is set
+#else
+    return 0;
 #endif
 }
 
@@ -183,11 +201,11 @@ void tTxEspWifiBridge::passthrough_do_rts_cts(void)
             leds.TickPassthrough_ms();
         }
 
-        uint8_t dtr_rts = esp_dtr_rts();
+        uint8_t dtr_rts = read_dtr_rts();
 
         if (dtr_rts != dtr_rts_last) {
-            if (dtr_rts & 0x02) esp_reset_high(); else esp_reset_low();
-            if (dtr_rts & 0x01) esp_gpio0_high(); else esp_gpio0_low();
+            if (dtr_rts & RTS_SET) esp_reset_high(); else esp_reset_low();
+            if (dtr_rts & DTR_SET) esp_gpio0_high(); else esp_gpio0_low();
             //dbg.puts("\ndtr,rts ="); dbg.putc(dtr_rts + '0');
         }
         dtr_rts_last = dtr_rts;
@@ -283,10 +301,13 @@ void tTxEspWifiBridge::passthrough_do(void)
 }
 
 
+#ifdef USE_ESP_WIFI_BRIDGE_RST_GPIO0
+
 #define ESP_DBG(x)
 
 #define ESP_CMDRES_LEN      46
 #define ESP_CMDRES_TMO_MS   50
+
 
 bool tTxEspWifiBridge::esp_read(const char* const cmd, uint8_t* const res, uint8_t* const len)
 {
@@ -405,11 +426,12 @@ char cmd_str[32];
     delay_ms(100);
 }
 
+#endif // USE_ESP_WIFI_BRIDGE_RST_GPIO0
 
 
 void tTxEspWifiBridge::run_autoconfigure(void)
 {
-// we currently don't do anything if no GPIO0
+// we currently don't do anything if no RST, GPIO0
 #ifdef USE_ESP_WIFI_BRIDGE_RST_GPIO0
 uint8_t s[ESP_CMDRES_LEN+2];
 uint8_t len;
@@ -470,7 +492,7 @@ esp_read("AT+WIFIPOWER=?", s, &len);)
 if (esp_read("AT+NAME=?", s, &len)) { dbg.puts("!ALL GOOD!\r\n"); } else { dbg.puts("!F IT!\r\n"); }
 
     esp_gpio0_high(); // leave forced AT mode
-#endif
+#endif // USE_ESP_WIFI_BRIDGE_RST_GPIO0
 }
 
 
