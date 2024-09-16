@@ -46,7 +46,7 @@ List of supported modules, and board which needs to be selected
 //#define MODULE_NODEMCU_ESP32_WROOM32
 //#define MODULE_ESP32_PICO_KIT
 //#define MODULE_ADAFRUIT_QT_PY_ESP32_S2
-#define MODULE_TTGO_MICRO32
+//#define MODULE_TTGO_MICRO32
 //#define MODULE_M5STAMP_C3_MATE
 //#define MODULE_M5STAMP_C3U_MATE
 //#define MODULE_M5STAMP_C3U_MATE_FOR_FRSKY_R9M // uses inverted serial
