@@ -71,10 +71,11 @@ class AtMode {
 
   private:
     uint8_t gpio0_pin;
-    uint8_t at_pos = 0;
+    bool gpio_is_low;
+    unsigned long startup_tmo_ms;
+    uint8_t at_pos;
     uint8_t at_buf[128];
-    bool at_is_active = false;
-
+    
     bool restart_needed;
 
     void restart(void);
@@ -87,32 +88,42 @@ void AtMode::Init(uint8_t _gpio_pin)
     pinMode(gpio0_pin, INPUT);
 
     at_pos = 0;
-    at_is_active = false;
+    gpio_is_low = false;
     restart_needed = false;
 
     // https://github.com/espressif/esp-idf/issues/12473
     esp_log_level_set("wifi", ESP_LOG_NONE);
     // ?? esp_wifi_nan_stop();
+
+    startup_tmo_ms = 750 + millis(); // stay in AT loop for at least 750 ms, 0 = startup timeout ended
 }
 
 
 bool AtMode::Do(void) 
-{
-    if (!at_is_active) {
-        if (digitalRead(GPIO0_IO) == LOW) {
-            at_is_active = true;
+{ 
+    // handle toggles in GPIO0
+    if (!gpio_is_low) {
+        if (digitalRead(GPIO0_IO) == LOW) { // toggled LOW
+            gpio_is_low = true;
             at_pos = 0;
             restart_needed = false;
             serialFlushRx();
         }
     } else {
-        if (digitalRead(GPIO0_IO) == HIGH) {
-            at_is_active = false;
+        if (digitalRead(GPIO0_IO) == HIGH) { // toggled HIGH
+            gpio_is_low = false;
+            startup_tmo_ms = 0; // also declare end of startup timeout phase
             serialFlushRx();
         }
     }
 
-    if (!at_is_active) return false;
+    // handle startup timeout
+    if (startup_tmo_ms) {
+        if (millis() > startup_tmo_ms) startup_tmo_ms = 0;
+    } 
+
+    // when not in startup phase and not GPIO0 low, do to WiFi loop 
+    if (!startup_tmo_ms && !gpio_is_low) return false;
 
     int avail = SERIAL.available();
     if (avail > 0) {

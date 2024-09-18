@@ -7,14 +7,14 @@
 // Basic but effective & reliable transparent WiFi or Bluetooth <-> serial bridge.
 // Minimizes wireless traffic while respecting latency by better packeting algorithm.
 //*******************************************************
-// 17. Sep. 2024
+// 18. Sep. 2024
 //*********************************************************/
 // inspired by examples from Arduino
 // NOTES:
-// Partition Scheme needs to be changed to "No OTA (Large App)"
-// Use upload speed 115200 if serial passthrough shall be used for flashing
-// ArduinoIDE 2.3.2, esp32 by Espressif Systems 3.0.4
-// this can be useful: https://github.com/espressif/arduino-esp32/blob/master/libraries
+// - Partition Scheme needs to be changed to "No OTA (Large App)"
+// - Use upload speed 115200 if serial passthrough shall be used for flashing
+// - ArduinoIDE 2.3.2, esp32 by Espressif Systems 3.0.4
+// This can be useful: https://github.com/espressif/arduino-esp32/blob/master/libraries
 /*
 Definitions:
 - "module" refers to the physical hardware
@@ -24,6 +24,7 @@ For more details on the modules see mlrs-wireless-bridge-boards.h
 
 List of supported modules, and board which needs to be selected
 
+- MatekSys TxM-TD30 mLRS module   board: ESP32 PIC0-D4
 - Espressif ESP32-DevKitC V4      board: ESP32 Dev Module
 - NodeMCU ESP32-Wroom-32          board: ESP32 Dev Module
 - Espressif ESP32-PICO-KIT        board: ESP32 PICO-D4
@@ -43,12 +44,13 @@ List of supported modules, and board which needs to be selected
 
 // Module
 // uncomment what you want, you must select one (and only one)
+//#define MODULE_MATEK_TXM_TD30
 //#define MODULE_GENERIC
 //#define MODULE_ESP32_DEVKITC_V4
 //#define MODULE_NODEMCU_ESP32_WROOM32
 //#define MODULE_ESP32_PICO_KIT
 //#define MODULE_ADAFRUIT_QT_PY_ESP32_S2
-#define MODULE_TTGO_MICRO32
+//#define MODULE_TTGO_MICRO32
 //#define MODULE_M5STAMP_C3_MATE
 //#define MODULE_M5STAMP_C3U_MATE
 //#define MODULE_M5STAMP_C3U_MATE_FOR_FRSKY_R9M // uses inverted serial
@@ -63,19 +65,20 @@ List of supported modules, and board which needs to be selected
 
 // Wireless protocol
 // 0 = WiFi TCP, 1 = WiFi UDP, 2 = Wifi UDPCl, 3 = Bluetooth (not available for all boards)
-#define WIRELESS_PROTOCOL  3
+// Note: If GPIO0_IO is defined, when it only sets the default for protocols TCP, UDP, BT (0, 1, 3)
+#define WIRELESS_PROTOCOL  1
 
 // GPIO0 usage
-// comment out, if your Tx module DOES NOT supports the RESET and GPIO0 lines on the EPS32
+// uncomment, if your Tx module DOES NOT supports the RESET and GPIO0 lines on the EPS32
 // the number determines the IO pin, usally it is 0
-#define GPIO0_IO  0
+// #define GPIO0_IO  0
 
 
 //**********************//
 //*** WiFi settings ***//
 
 // for TCP, UDP (only for these two)
-String ssid = "mLRS AP"; // Wifi name
+String ssid = ""; // "mLRS AP"; // Wifi name, "" results in a default name, like "mLRS-13427 AP UDP" 
 String password = ""; // "thisisgreat"; // WiFi password, "" makes it an open AP
 
 IPAddress ip(192, 168, 4, 55); // connect to this IP // MissionPlanner default is 127.0.0.1, so enter
@@ -91,21 +94,22 @@ IPAddress ip_udpcl(192, 168, 0, 164); // connect to this IP // MissionPlanner de
 
 int port_udpcl = 14550; // connect to this port per UDPCL // MissionPlanner default is 14550
 
-// WiFi channel
+// WiFi channel (only for TCP, UDP)
 // choose 1, 6, 11, 13. Channel 13 (2461-2483 MHz) has the least overlap with mLRS 2.4 GHz frequencies.
 // Note: Channel 13 is generally not available in the US, where 11 is the maximum.
 #define WIFI_CHANNEL  6
 
 // WiFi power (for all TCP, UDP, UDPCl)
-// comment out for default setting
+// this sets the power level for the WiFi protocols
+// Note: If GPIO0_IO is defined, this sets the power for the medium power option.
 // Note: In order to find the possible options, right click on WIFI_POWER_19_5dBm and choose "Go To Definiton"
-#define WIFI_POWER_MEDIUM  WIFI_POWER_2dBm // WIFI_POWER_MINUS_1dBm is the lowest possible, WIFI_POWER_19_5dBm is the max
+#define WIFI_POWER  WIFI_POWER_2dBm // WIFI_POWER_MINUS_1dBm is the lowest possible, WIFI_POWER_19_5dBm is the max
 
 
 //**************************//
 //*** Bluetooth settings ***//
 
-String bluetooth_device_name = "mLRS BT"; // Bluetooth device name
+String bluetooth_device_name = ""; // "mLRS BT"; // Bluetooth device name, "" results in a default name, like "mLRS-13427 BT" 
 
 
 //************************//
@@ -130,6 +134,7 @@ String bluetooth_device_name = "mLRS BT"; // Bluetooth device name
 //-------------------------------------------------------
 
 #include <WiFi.h>
+#include "esp_mac.h"
 #if (WIRELESS_PROTOCOL != 2) // not UDPCl
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
     #error Bluetooth is not enabled !
@@ -187,7 +192,7 @@ typedef enum {
 #define PROTOCOL_DEFAULT  WIRELESS_PROTOCOL
 #define BAUDRATE_DEFAULT  BAUD_RATE
 #define WIFICHANNEL_DEFAULT  WIFI_CHANNEL
-#define WIFIPOWER_DEFAULT  WIFI_POWER_MED
+#define WIFIPOWER_DEFAULT  WIFI_POWER
 
 #define G_PROTOCOL_STR  "protocol"
 int g_protocol = PROTOCOL_DEFAULT;
@@ -205,8 +210,8 @@ Preferences preferences;
 AtMode at_mode;
 #endif
 
+String device_name = "";
 bool wifi_initialized;
-unsigned long startup_tmo_ms;
 bool led_state;
 unsigned long led_tlast_ms;
 bool is_connected;
@@ -224,13 +229,35 @@ void serialFlushRx(void)
 // setup() and loop()
 //-------------------------------------------------------
 
+void setup_device_name(void)
+{
+    uint8_t MAC_buf[6+2];
+    // https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/misc_system_api.html#mac-address
+    // MACs are different for STA and AP, BT
+    esp_base_mac_addr_get(MAC_buf);
+    uint16_t device_id = 0;
+    for (uint8_t i = 0; i < 5; i++) device_id += MAC_buf[i] + (uint16_t)MAC_buf[i + 1] << 8;
+    device_name = "mLRS-";
+#ifdef DEVICE_NAME_HEAD
+    device_name = String(DEVICE_NAME_HEAD) + "-mLRS-";
+#endif    
+    if (g_protocol == WIRELESS_PROTOCOL_TCP) {
+        device_name = (ssid == "") ? device_name + String(device_id) + " AP TCP" : ssid;
+    } else if (g_protocol == WIRELESS_PROTOCOL_UDP) {
+        device_name = (ssid == "") ? device_name + String(device_id) + " AP UDP" : ssid;
+    } else if (g_protocol == WIRELESS_PROTOCOL_BT) {
+        device_name = (bluetooth_device_name == "") ? device_name + String(device_id) + " BT" : bluetooth_device_name;
+    }
+}
+
+
 void setup_wifipower()
 {
     //WiFi.setTxPower(WIFI_POWER); // set WiFi power, AP or STA must have been started, returns false if it fails
     switch (g_wifipower) {
         case WIFI_POWER_LOW: WiFi.setTxPower(WIFI_POWER_MINUS_1dBm); break;
-#ifdef WIFI_POWER_MEDIUM
-        case WIFI_POWER_MED: WiFi.setTxPower(WIFI_POWER_MEDIUM); break;
+#ifdef WIFI_POWER
+        case WIFI_POWER_MED: WiFi.setTxPower(WIFI_POWER); break;
 #else
         case WIFI_POWER_MED: WiFi.setTxPower(WIFI_POWER_5dBm); break;
 #endif        
@@ -242,14 +269,15 @@ void setup_wifipower()
 void setup_wifi()
 {
 #if (WIRELESS_PROTOCOL != 2)
+    setup_device_name();
+
 if (g_protocol == WIRELESS_PROTOCOL_TCP || g_protocol == WIRELESS_PROTOCOL_UDP) {
 //-- WiFi TCP, UDP
 
     // AP mode
     WiFi.mode(WIFI_AP); // seems not to be needed, done by WiFi.softAP()?
     WiFi.softAPConfig(ip, ip_gateway, netmask);
-    String ssid_full = (g_protocol == WIRELESS_PROTOCOL_UDP) ? ssid + " UDP" : ssid + " TCP";
-    WiFi.softAP(ssid_full.c_str(), (password.length()) ? password.c_str() : NULL, g_wifichannel); // channel = 1 is default
+    WiFi.softAP(device_name.c_str(), (password.length()) ? password.c_str() : NULL, g_wifichannel); // channel = 1 is default
     DBG_PRINT("ap ip address: ");
     DBG_PRINTLN(WiFi.softAPIP()); // comes out as 192.168.4.1
     DBG_PRINT("channel: ");
@@ -266,8 +294,9 @@ if (g_protocol == WIRELESS_PROTOCOL_TCP || g_protocol == WIRELESS_PROTOCOL_UDP) 
 }else
 if (g_protocol == WIRELESS_PROTOCOL_BT) {
 //-- Bluetooth
+// Comment: CONFIG_BT_SSP_ENABLED appears to be defined per default, so setPin() is not available
 
-    SerialBT.begin(bluetooth_device_name);
+    SerialBT.begin(device_name);
 }
 
 #elif (WIRELESS_PROTOCOL == 2)
@@ -356,7 +385,6 @@ void setup()
 #endif
 
     wifi_initialized = false; // setup_wifi();
-    startup_tmo_ms = 750 + millis();
 
     led_tlast_ms = 0;
     led_state = false;
@@ -374,10 +402,6 @@ void loop()
 {
 #ifdef GPIO0_IO
     if (at_mode.Do()) return;
-    if (startup_tmo_ms) {
-        if (millis() > startup_tmo_ms) startup_tmo_ms = 0;
-        return;
-    } 
 #endif
     unsigned long tnow_ms = millis();
 
