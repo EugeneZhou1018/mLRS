@@ -7,7 +7,7 @@
 // Basic but effective & reliable transparent WiFi or Bluetooth <-> serial bridge.
 // Minimizes wireless traffic while respecting latency by better packeting algorithm.
 //*******************************************************
-// 18. Sep. 2024
+// 19. Sep. 2024
 //*********************************************************/
 // inspired by examples from Arduino
 // NOTES:
@@ -45,7 +45,6 @@ List of supported modules, and board which needs to be selected
 // Module
 // uncomment what you want, you must select one (and only one)
 //#define MODULE_MATEK_TXM_TD30
-//#define MODULE_GENERIC
 //#define MODULE_ESP32_DEVKITC_V4
 //#define MODULE_NODEMCU_ESP32_WROOM32
 //#define MODULE_ESP32_PICO_KIT
@@ -57,6 +56,7 @@ List of supported modules, and board which needs to be selected
 //#define MODULE_M5STAMP_PICO
 //#define MODULE_M5STAMP_PICO_FOR_FRSKY_R9M // uses inverted serial
 //#define MODULE_M5STACK_ATOM_LITE
+//#define MODULE_GENERIC
 
 // Serial level
 // uncomment, if you need inverted serial for a supported module
@@ -65,13 +65,13 @@ List of supported modules, and board which needs to be selected
 
 // Wireless protocol
 // 0 = WiFi TCP, 1 = WiFi UDP, 2 = Wifi UDPCl, 3 = Bluetooth (not available for all boards)
-// Note: If GPIO0_IO is defined, when it only sets the default for protocols TCP, UDP, BT (0, 1, 3)
+// Note: If GPIO0_IO is defined, and protocol not UDPCl, when it only sets the default protocol
 #define WIRELESS_PROTOCOL  1
 
 // GPIO0 usage
-// uncomment, if your Tx module DOES NOT supports the RESET and GPIO0 lines on the EPS32
+// uncomment, if your Tx module does support the RESET and GPIO0 lines on the EPS32 (aka AT mode)
 // the number determines the IO pin, usally it is 0
-// #define GPIO0_IO  0
+//#define GPIO0_IO  0
 
 
 //**********************//
@@ -130,24 +130,38 @@ String bluetooth_device_name = ""; // "mLRS BT"; // Bluetooth device name, "" re
 
 
 //-------------------------------------------------------
-// Includes
-//-------------------------------------------------------
-
-#include <WiFi.h>
-#include "esp_mac.h"
-#if (WIRELESS_PROTOCOL != 2) // not UDPCl
-#if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
-    #error Bluetooth is not enabled !
-#endif
-#include <BluetoothSerial.h>
-#endif
-
-
-//-------------------------------------------------------
 // Module details
 //-------------------------------------------------------
 
 #include "mlrs-wireless-bridge-boards.h"
+
+
+//-------------------------------------------------------
+// Includes
+//-------------------------------------------------------
+
+#if ESP_ARDUINO_VERSION < ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    #error Version of your ESP Arduino Core below 3.0.0 !
+#elif ESP_ARDUINO_VERSION < ESP_ARDUINO_VERSION_VAL(3, 0, 4)
+    #warning Consider upgrading your ESP Arduino Core ! // warnings may not be displayed in console !
+#endif
+
+#ifdef GPIO0_IO
+#define USE_AT_MODE
+#endif
+
+#include <WiFi.h>
+#include "esp_mac.h"
+#if (WIRELESS_PROTOCOL != 2) // not UDPCl
+// for some reason checking
+// #if defined(CONFIG_BT_ENABLED) && defined(CONFIG_BLUEDROID_ENABLED)
+// does not work here. Also checking e.g. PLATFORM_ESP32_C3 seems not to work. 
+// This sucks. So we don't try to be nice but let the compiler work it out.
+#if defined USE_AT_MODE || (WIRELESS_PROTOCOL == 3) // for AT commands we require BT be available
+  #define USE_WIRELESS_PROTOCOL_BLUETOOTH
+  #include <BluetoothSerial.h>
+#endif
+#endif
 
 
 //-------------------------------------------------------
@@ -166,7 +180,9 @@ WiFiUDP udp;
 WiFiServer server(port_tcp);
 WiFiClient client;
 // Bluetooth
+#ifdef USE_WIRELESS_PROTOCOL_BLUETOOTH
 BluetoothSerial SerialBT;
+#endif
 
 #elif (WIRELESS_PROTOCOL == 2) // WiFi UDPCl
 
@@ -203,7 +219,7 @@ int g_wifichannel = WIFICHANNEL_DEFAULT;
 #define G_WIFIPOWER_STR  "wifipower"
 int g_wifipower = WIFIPOWER_DEFAULT;
 
-#ifdef GPIO0_IO
+#ifdef USE_AT_MODE
 #include <Preferences.h>
 Preferences preferences;
 #include "mlrs-wireless-bridge-at-mode.h"
@@ -284,19 +300,23 @@ if (g_protocol == WIRELESS_PROTOCOL_TCP || g_protocol == WIRELESS_PROTOCOL_UDP) 
     DBG_PRINTLN(WiFi.channel());
 
     setup_wifipower();
-  #if (WIRELESS_PROTOCOL == 1)
-    udp.begin(port_udp);
-  #else
-    server.begin();
-    server.setNoDelay(true);
-  #endif    
+    if (g_protocol == WIRELESS_PROTOCOL_TCP) {
+        server.begin();
+        server.setNoDelay(true);
+    } else
+    if (g_protocol == WIRELESS_PROTOCOL_UDP) {    
+        udp.begin(port_udp);
+    }
 
-}else
+} else
 if (g_protocol == WIRELESS_PROTOCOL_BT) {
 //-- Bluetooth
 // Comment: CONFIG_BT_SSP_ENABLED appears to be defined per default, so setPin() is not available
+#ifdef USE_WIRELESS_PROTOCOL_BLUETOOTH
 
     SerialBT.begin(device_name);
+
+#endif    
 }
 
 #elif (WIRELESS_PROTOCOL == 2)
@@ -333,7 +353,7 @@ void setup()
     //delay(500); // we delay for 750 ms anyway
 
     // Preferences
-#ifdef GPIO0_IO
+#ifdef USE_AT_MODE
     preferences.begin("setup", false);     
 
     g_protocol = preferences.getInt(G_PROTOCOL_STR, 255); // 155 indicates not available
@@ -380,7 +400,7 @@ void setup()
     DBG_PRINTLN(txbufsize);
 
     // Gpio0 handling
-#ifdef GPIO0_IO
+#ifdef USE_AT_MODE
     at_mode.Init(GPIO0_IO);
 #endif
 
@@ -400,7 +420,7 @@ void setup()
 
 void loop()
 {
-#ifdef GPIO0_IO
+#ifdef USE_AT_MODE
     if (at_mode.Do()) return;
 #endif
     unsigned long tnow_ms = millis();
@@ -497,6 +517,7 @@ if (g_protocol == WIRELESS_PROTOCOL_UDP) {
 } else
 if (g_protocol == WIRELESS_PROTOCOL_BT) {
 //-- Bluetooth
+#ifdef USE_WIRELESS_PROTOCOL_BLUETOOTH
 
     int len = SerialBT.available();
     if (len > 0) {
@@ -519,6 +540,7 @@ if (g_protocol == WIRELESS_PROTOCOL_BT) {
         SerialBT.write(buf, len);
     }
 
+#endif // USE_WIRELESS_PROTOCOL_BLUETOOTH
 }
 
 #elif (WIRELESS_PROTOCOL == 2)
@@ -553,5 +575,7 @@ if (g_protocol == WIRELESS_PROTOCOL_BT) {
     }
 
 #endif // (WIRELESS_PROTOCOL == 2)
+
+    delay(2); // give it always a bit of time
 }
 
