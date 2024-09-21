@@ -429,7 +429,10 @@ void tRxMavlink::putc(char c)
         // So, as a stupid workaround we drop these commands for the GCS.
         if (msg_serial_out.msgid == FASTMAVLINK_MSG_ID_COMMAND_LONG && dronecan.ser_over_can_enabled) {
             uint16_t cmd = fmav_msg_command_long_get_field_command(&msg_serial_out);
-            if (cmd == MAV_CMD_CAN_FORWARD) return; // don't send to fc
+            if (cmd == MAV_CMD_CAN_FORWARD) {
+dbg.puts("\nm CMD_CAN_FORWARD");
+//xx                 return; // don't send to fc
+            }
         }
 #endif
 
