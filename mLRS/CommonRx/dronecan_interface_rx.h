@@ -60,25 +60,10 @@ static uint16_t last_cnt;
 }
 
 
-void stm32_uid(uint8_t uid[12])
-{
-    // shorter than using LL_GetUID_Word0(), LL_GetUID_Word1(), LL_GetUID_Word2()
-    uint8_t* uid_ptr = (uint8_t*)UID_BASE;
-    memcpy(uid, uid_ptr, 12);
-}
-
-
-uint32_t stm32_cpu_id(void)
-{
-    // easier and more complete than using LL_CPUID_Getxxxx() functions
-    return SCB->CPUID;
-}
-
-
 void dronecan_uid(uint8_t uid[DC_UNIQUE_ID_LEN])
 {
-    stm32_uid(uid); // fill first 12 bytes with UID
-    uint32_t cpu_id = stm32_cpu_id(); // fill last bytes with cpu id, this idea is taken from ArduPilot. THX.
+    mcu_uid(uid); // fill first 12 bytes with UID
+    uint32_t cpu_id = mcu_cpu_id(); // fill last bytes with cpu id, this idea is taken from ArduPilot. THX.
     memcpy(&uid[12], &cpu_id, 4);
 }
 
