@@ -53,7 +53,7 @@ static uint16_t last_cnt;
 
     uint16_t cnt = micros16();
     if (cnt < last_cnt) {
-      overflow_cnt += 0x10000;
+        overflow_cnt += 0x10000;
     }
     last_cnt = cnt;
     return overflow_cnt + cnt;
@@ -490,7 +490,7 @@ void tRxDroneCan::handle_get_node_info_request(CanardInstance* const ins, Canard
     for (uint8_t n = 0; n < strlen((char*)_p.node_info_resp.name.data); n ++) {
         if (_p.node_info_resp.name.data[n] == ' ') _p.node_info_resp.name.data[n] = '_';
         if (_p.node_info_resp.name.data[n] >= 'A' && _p.node_info_resp.name.data[n] <= 'Z') {
-          _p.node_info_resp.name.data[n] = _p.node_info_resp.name.data[n] - 'A' + 'a';
+            _p.node_info_resp.name.data[n] = _p.node_info_resp.name.data[n] - 'A' + 'a';
         }
     }
     _p.node_info_resp.name.len = strlen((char*)_p.node_info_resp.name.data);
@@ -718,24 +718,24 @@ bool dronecan_should_accept_transfer(
     // handle service requests
     if (transfer_type == CanardTransferTypeRequest) {
         switch (data_type_id) {
-            case UAVCAN_PROTOCOL_GETNODEINFO_ID:
-                if (!dronecan.id_is_allcoated()) return false;
-                *out_data_type_signature = UAVCAN_PROTOCOL_GETNODEINFO_REQUEST_SIGNATURE;
-                return true;
+        case UAVCAN_PROTOCOL_GETNODEINFO_ID:
+            if (!dronecan.id_is_allcoated()) return false;
+            *out_data_type_signature = UAVCAN_PROTOCOL_GETNODEINFO_REQUEST_SIGNATURE;
+            return true;
         }
     }
     // handle broadcast
     if (transfer_type == CanardTransferTypeBroadcast) {
         switch (data_type_id) {
-            case UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID:
-                if (dronecan.id_is_allcoated()) return false; // we are already done with node id allocation
-                *out_data_type_signature = UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_SIGNATURE;
-                return true;
-            case UAVCAN_TUNNEL_TARGETTED_ID:
-                if (!dronecan.ser_over_can_enabled) return false; // should not happen, play it safe
-                if (!dronecan.id_is_allcoated()) return false;
-                *out_data_type_signature = UAVCAN_TUNNEL_TARGETTED_SIGNATURE;
-                return true;
+        case UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID:
+            if (dronecan.id_is_allcoated()) return false; // we are already done with node id allocation
+            *out_data_type_signature = UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_SIGNATURE;
+            return true;
+        case UAVCAN_TUNNEL_TARGETTED_ID:
+            if (!dronecan.ser_over_can_enabled) return false; // should not happen, play it safe
+            if (!dronecan.id_is_allcoated()) return false;
+            *out_data_type_signature = UAVCAN_TUNNEL_TARGETTED_SIGNATURE;
+            return true;
         }
     }
     return false;
@@ -748,20 +748,20 @@ void dronecan_on_transfer_received(CanardInstance* const ins, CanardRxTransfer* 
     // handle service requests
     if (transfer->transfer_type == CanardTransferTypeRequest) {
         switch (transfer->data_type_id) {
-            case UAVCAN_PROTOCOL_GETNODEINFO_ID:
-                dronecan.handle_get_node_info_request(ins, transfer);
-                return;
+        case UAVCAN_PROTOCOL_GETNODEINFO_ID:
+            dronecan.handle_get_node_info_request(ins, transfer);
+            return;
         }
     }
     // handle broadcasts
     if (transfer->transfer_type == CanardTransferTypeBroadcast) {
         switch (transfer->data_type_id) {
-            case UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID:
-                dronecan.handle_dynamic_node_id_allocation_broadcast(ins, transfer);
-                return;
-            case UAVCAN_TUNNEL_TARGETTED_ID:
-                dronecan.handle_tunnel_targetted_broadcast(transfer);
-                return;
+        case UAVCAN_PROTOCOL_DYNAMIC_NODE_ID_ALLOCATION_ID:
+            dronecan.handle_dynamic_node_id_allocation_broadcast(ins, transfer);
+            return;
+        case UAVCAN_TUNNEL_TARGETTED_ID:
+            dronecan.handle_tunnel_targetted_broadcast(transfer);
+            return;
         }
     }
 }
