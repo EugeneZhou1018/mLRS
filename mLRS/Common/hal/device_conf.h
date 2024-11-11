@@ -30,6 +30,14 @@ The default selection of frequency bands can be overruled by feature defines.
 
 #include "../common_conf.h"
 
+//-- TD100 mLRS
+#ifdef RX_TD100_G431KB
+  #define DEVICE_NAME "TD100 G431KB"
+  #define DEVICE_IS_RECEIVER
+  #define DEVICE_HAS_SX126x
+  #define FREQUENCY_BAND_868_MHZ
+  #define FREQUENCY_BAND_915_MHZ_FCC
+#endif
 
 //-- MATEKSYS mLRS devices
 

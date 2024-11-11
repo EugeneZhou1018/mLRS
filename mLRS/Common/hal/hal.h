@@ -89,6 +89,10 @@ Note: Some "high-level" features are set for each device in the device_conf.h fi
 
 #include "device_conf.h"
 
+//-- TD100 mLRS
+#ifdef RX_TD100_G431KB
+#include "stm32/rx-hal-TD100-g431kb.h"
+#endif
 
 //-- MATEKSYS mLRS devices
 
