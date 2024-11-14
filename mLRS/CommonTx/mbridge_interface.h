@@ -11,7 +11,7 @@
 #pragma once
 
 
-#if (defined DEVICE_HAS_JRPIN5)
+#ifdef DEVICE_HAS_JRPIN5
 
 #include "../Common/libs/fifo.h"
 #include "setup_tx.h"
@@ -114,7 +114,7 @@ void mbridge_uart_tc_callback(void) { mbridge.uart_tc_callback(); }
 // is called in isr context
 bool tMBridge::transmit_start(void)
 {
-if (crsf_emulation) while (1) {}; // must not happen
+    if (crsf_emulation) while(1){}; // must not happen
 
     tx_free = true; // tell external code that next slot can be filled
 
@@ -161,7 +161,7 @@ void tMBridge::send_command(void)
 #define MBRIDGE_TMO_US  250
 
 
-// is called in isr context, or in ParseCrsfFrame() in case of CRSF emulatiom
+// is called in isr context, or in ParseCrsfFrame() in case of CRSF emulation
 void tMBridge::parse_nextchar(uint8_t c)
 {
     uint16_t tnow_us = micros16();
@@ -336,7 +336,7 @@ void tMBridge::Init(bool enable_flag, bool crsf_emulation_flag)
 // polled in main loop
 bool tMBridge::ChannelsUpdated(tRcData* const rc)
 {
-if (crsf_emulation) return false; // CRSF: just don't ever do it, should not happen
+    if (crsf_emulation) return false; // CRSF: just don't ever do it, should not happen
 
     if (!enabled) return false;
 
@@ -353,7 +353,7 @@ if (crsf_emulation) return false; // CRSF: just don't ever do it, should not hap
 // polled in main loop
 bool tMBridge::TelemetryUpdate(uint8_t* const task)
 {
-if (crsf_emulation) return false; // CRSF: just don't ever do it, should not happen
+    if (crsf_emulation) return false; // CRSF: just don't ever do it, should not happen
 
     if (!enabled) return false;
 
@@ -583,9 +583,13 @@ tMBridgeInfo info = {};
         info.rx_actual_diversity = DIVERSITY_NUM; // 5 = invalid
     }
 
-    // we try to also set the deprecated fields to something reasonable, to help with transition
-    info.__tx_actual_diversity = (info.tx_actual_diversity <= 2) ? info.tx_actual_diversity : 3;
-    info.__rx_actual_diversity = (info.rx_actual_diversity <= 2) ? info.rx_actual_diversity : 3;
+    info.has_status = 1; // to indicate it has these flags
+    info.binding = (bind.IsInBind()) ? 1 : 0;
+    info.connected = (connected()) ? 1 : 0;
+    info.rx_LQ_low = (stats.received_LQ_rc < 65) ? 1 : 0;
+    info.tx_LQ_low = (stats.GetLQ_serial() < 65) ? 1 : 0;
+
+    info.param_num = SETUP_PARAMETER_NUM; // known if non-zero
 
     mbridge.SendCommand(MBRIDGE_CMD_INFO, (uint8_t*)&info);
 }
@@ -596,7 +600,7 @@ void mbridge_send_DeviceItemTx(void)
 tMBridgeDeviceItem item = {};
 
     item.firmware_version_u16 = version_to_u16(VERSION);
-    item.setup_layout = SETUPLAYOUT;
+    item.setup_layout_u16 = version_to_u16(SETUPLAYOUT);
     strbufstrcpy(item.device_name_20, DEVICE_NAME, 20);
     mbridge.SendCommand(MBRIDGE_CMD_DEVICE_ITEM_TX, (uint8_t*)&item);
 }
@@ -608,11 +612,11 @@ tMBridgeDeviceItem item = {};
 
     if (SetupMetaData.rx_available) {
         item.firmware_version_u16 = version_to_u16(SetupMetaData.rx_firmware_version);
-        item.setup_layout = SetupMetaData.rx_setup_layout;
+        item.setup_layout_u16 = version_to_u16(SetupMetaData.rx_setup_layout);
         strbufstrcpy(item.device_name_20, SetupMetaData.rx_device_name, 20);
     } else {
         item.firmware_version_u16 = 0;
-        item.setup_layout = 0;
+        item.setup_layout_u16 = 0;
         strbufstrcpy(item.device_name_20, "", 20);
     }
     mbridge.SendCommand(MBRIDGE_CMD_DEVICE_ITEM_RX, (uint8_t*)&item);
@@ -660,7 +664,7 @@ void param_get_opt_shortened_str(char* const out, uint8_t param_idx)
             }
             opt_i++;
             pos = 0;
-            if (out_pos > 80) while (1) {} // must not happen
+            if (out_pos > 80) while(1){} // must not happen
         }
     }
 /*
@@ -850,7 +854,7 @@ void mbridge_send_cmd(uint8_t cmd)
 class tMBridge : public tSerialBase
 {
   public:
-    void Init(bool enable_flag, bool crsf_emulation_flag) {};
+    void Init(bool enable_flag, bool crsf_emulation_flag) {}
     void TelemetryStart(void) {}
     void TelemetryTick_ms(void) {}
     void Lock(void) {}
@@ -859,6 +863,6 @@ class tMBridge : public tSerialBase
 
 tMBridge mbridge;
 
-#endif // if (defined DEVICE_HAS_JRPIN5)
+#endif // ifdef DEVICE_HAS_JRPIN5
 
 #endif // MBRIDGE_INTERFACE_H

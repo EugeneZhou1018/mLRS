@@ -24,7 +24,7 @@
 //-- common to Tx & Rx
 
 // these are the frequency band options available to the user
-typedef enum {
+typedef enum : uint8_t {
     SETUP_FREQUENCY_BAND_2P4_GHZ = 0,
     SETUP_FREQUENCY_BAND_915_MHZ_FCC,
     SETUP_FREQUENCY_BAND_868_MHZ,
@@ -38,7 +38,7 @@ typedef enum {
 // these are the frequency band options available to the hardware
 // used in the SX12xx drivers and FHSS class
 // should not be defined here, but we do here for convenience
-typedef enum {
+typedef enum : uint8_t {
     SX_FHSS_CONFIG_FREQUENCY_BAND_2P4_GHZ = 0,
     SX_FHSS_CONFIG_FREQUENCY_BAND_915_MHZ_FCC,
     SX_FHSS_CONFIG_FREQUENCY_BAND_868_MHZ,
@@ -149,6 +149,24 @@ typedef enum {
 } RX_SEND_RADIO_STATUS_ENUM;
 
 
+typedef enum {
+    POWER_SWITCH_CHANNEL_OFF = 0,
+    POWER_SWITCH_CHANNEL_CH5,
+    POWER_SWITCH_CHANNEL_CH6,
+    POWER_SWITCH_CHANNEL_CH7,
+    POWER_SWITCH_CHANNEL_CH8,
+    POWER_SWITCH_CHANNEL_CH9,
+    POWER_SWITCH_CHANNEL_CH10,
+    POWER_SWITCH_CHANNEL_CH11,
+    POWER_SWITCH_CHANNEL_CH12,
+    POWER_SWITCH_CHANNEL_CH13,
+    POWER_SWITCH_CHANNEL_CH14,
+    POWER_SWITCH_CHANNEL_CH15,
+    POWER_SWITCH_CHANNEL_CH16,
+    POWER_SWITCH_CHANNEL_NUM,
+} POWER_SWITCH_CHANNEL_ENUM;
+
+
 //-- Tx only
 
 typedef enum {
@@ -194,6 +212,31 @@ typedef enum {
     BUZZER_RX_LQ,
     BUZZER_NUM,
 } TX_BUZZER_END_ENUM;
+
+
+typedef enum {
+    WIFI_PROTOCOL_TCP = 0,
+    WIFI_PROTOCOL_UDP,
+    WIFI_PROTOCOL_BT,
+    WIFI_PROTOCOL_NUM,
+} TX_WIFI_PROTOCOL_ENUM;
+
+
+typedef enum {
+    WIFI_CHANNEL_1 = 0,
+    WIFI_CHANNEL_6,
+    WIFI_CHANNEL_11,
+    WIFI_CHANNEL_13,
+    WIFI_CHANNEL_NUM,
+} TX_WIFI_CHANNEL_ENUM;
+
+
+typedef enum {
+    WIFI_POWER_LOW = 0,
+    WIFI_POWER_MED,
+    WIFI_POWER_MAX,
+    WIFI_POWER_NUM,
+} TX_WIFI_POWER_ENUM;
 
 
 //-- Rx only
@@ -305,8 +348,12 @@ typedef struct
     uint8_t Buzzer;
     uint8_t __CliLineEnd; // deprecated
     uint8_t MavlinkComponent;
+    uint8_t PowerSwitchChannel;
+    uint8_t WifiProtocol;
+    uint8_t WifiChannel;
+    uint8_t WifiPower;
 
-    uint8_t spare[8];
+    uint8_t spare[4];
 } tTxSetup; // 20 bytes
 
 
@@ -325,9 +372,10 @@ typedef struct
     uint8_t SendRcChannels;
     uint8_t __RadioStatusMethod; // deprecated
     uint8_t OutLqChannelMode;
+    uint8_t PowerSwitchChannel;
     uint8_t SerialPort;
 
-    uint8_t spare[6];
+    uint8_t spare[5];
 
     int8_t FailsafeOutChannelValues_Ch1_Ch12[12]; // -120 .. +120
     uint8_t FailsafeOutChannelValues_Ch13_Ch16[4]; // 0,1,2 = -120, 0, +120
@@ -399,8 +447,8 @@ typedef struct
 
     bool rx_available;
 
-    uint32_t rx_firmware_version;
-    uint16_t rx_setup_layout;
+    uint32_t rx_firmware_version; // 6.99.99 + enough head room
+    uint32_t rx_setup_layout; // 6.99.99 + enough head room
     char rx_device_name[20+1];
     int8_t rx_actual_power_dbm;
     uint8_t rx_actual_diversity;

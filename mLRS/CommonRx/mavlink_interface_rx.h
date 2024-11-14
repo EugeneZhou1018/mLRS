@@ -48,8 +48,10 @@ class tRxAutoPilot
   public:
     void Init(void);
     void Do(void);
+
     bool RequestAutopilotVersion(void);
     bool HasMFtpFlowControl(void);
+    bool HasDroneCanExtendedRcStats(void);
 
     void handle_heartbeat(fmav_message_t* const msg);
     void handle_autopilot_version(fmav_message_t* const msg);
@@ -78,14 +80,15 @@ class tRxMavlink
     uint8_t getc(void);
     void flush(void);
 
+    tRxAutoPilot autopilot;
+
   private:
     void send_msg_serial_out(void);
     void generate_radio_status(void);
     void generate_rc_channels_override(void);
     void generate_radio_rc_channels(void);
     void generate_radio_link_stats(void);
-    void generate_radio_link_information(void);
-    void generate_radio_link_flow_control(void);
+    void generate_radio_link_information(void); // not used
 
     uint16_t serial_in_available(void);
     bool handle_txbuf_ardupilot(uint32_t tnow_ms);
@@ -145,7 +148,6 @@ class tRxMavlink
     void generate_cmd_ack(void);
 
     // to handle autopilot detection
-    tRxAutoPilot autopilot;
     void generate_autopilot_version_request(void);
 
     uint8_t _buf[MAVLINK_BUF_SIZE]; // temporary working buffer, to not burden stack
@@ -324,13 +326,6 @@ void tRxMavlink::Do(void)
 
     if (inject_radio_status) { // check available size!?
         inject_radio_status = false;
-/* only for deving, always send radio status
-        if (Setup.Rx.SendRcChannels == SEND_RC_CHANNELS_RADIORCCHANNELS) {
-            generate_radio_link_flow_control();
-        } else {
-            generate_radio_status();
-        }
-*/
         generate_radio_status();
         send_msg_serial_out();
     }
@@ -422,15 +417,19 @@ void tRxMavlink::putc(char c)
         }
 #endif
 
-#if defined DEVICE_HAS_DRONECAN
-        // For some not yet understood reasons, the CAN_FRAME MAVLink messages which
-        // ArduPilot will send as a response to the command makes the CAN bus get stuck
-        // and the receiver don't gets any CAN messages anymore.
-        // So, as a stupid workaround we drop these commands for the GCS.
+#ifdef DEVICE_HAS_DRONECAN
+        // Two issues, which have been resolved but are present in some versions of
+        // MissionPlanner and ArduPilot.
+        // MissionPlanner: Always sends out MAV_CMD_CAN_FORWARD commands after initial connection, but shouldn't.
+        // ArduPilot: Jams the CAN bus when it starts sending CAN_FRAME MAVLink messages as
+        // response to MAV_CMD_CAN_FORWARD commands, when MAVLink is over DroneCAN. The effect
+        // is that all DroneCAN communication stops, which is catastrophic.
+        // The workaround which prevents this efficiently is to NOT pass on the MAV_CMD_CAN_FORWARD command to the fc.
+        // Since one cannot guarantee that a user does not use a combination with problematic MP or AP versions,
+        // the workaround is kept.
         if (msg_serial_out.msgid == FASTMAVLINK_MSG_ID_COMMAND_LONG && dronecan.ser_over_can_enabled) {
             uint16_t cmd = fmav_msg_command_long_get_field_command(&msg_serial_out);
             if (cmd == MAV_CMD_CAN_FORWARD) {
-//dbg.puts("\nm CMD_CAN_FORWARD");
                 return; // don't send to fc
             }
         }
@@ -738,13 +737,6 @@ if(txbuf>50) dbg.puts("*1.025 "); else dbg.puts("*1 ");
 
 
 //-------------------------------------------------------
-// Handle Messages
-//-------------------------------------------------------
-
-// nothing yet
-
-
-//-------------------------------------------------------
 // Generate Messages
 //-------------------------------------------------------
 
@@ -889,6 +881,7 @@ int8_t rx_snr1, rx_snr2;
 }
 
 
+// not used
 void tRxMavlink::generate_radio_link_information(void)
 {
     uint16_t tx_ser_data_rate = 0; // ignore/unknown
@@ -972,6 +965,10 @@ void tRxMavlink::generate_autopilot_version_request(void)
         &status_serial_out);
 }
 
+
+//-------------------------------------------------------
+// Handle Messages
+//-------------------------------------------------------
 
 // handle messages from the fc
 void tRxMavlink::handle_msg(fmav_message_t* const msg)
@@ -1108,6 +1105,14 @@ bool tRxAutoPilot::RequestAutopilotVersion(void)
 
 
 bool tRxAutoPilot::HasMFtpFlowControl(void)
+{
+    if (autopilot != MAV_AUTOPILOT_ARDUPILOTMEGA) return false; // we don't know for this autopilot
+
+    return (version >= 040600);
+}
+
+
+bool tRxAutoPilot::HasDroneCanExtendedRcStats(void)
 {
     if (autopilot != MAV_AUTOPILOT_ARDUPILOTMEGA) return false; // we don't know for this autopilot
 

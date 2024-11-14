@@ -33,11 +33,15 @@ void setup_configure_metadata(void)
   // DUALBAND 2.4 GHz & 868/915 MHz !
   #if defined FREQUENCY_BAND_2P4_GHZ && defined FREQUENCY_BAND_915_MHZ_FCC && defined FREQUENCY_BAND_868_MHZ
     SetupMetaData.FrequencyBand_allowed_mask = 0b000110; // 915 FCC, 868
+  #else
+    #error Unknown Frequencyband !
   #endif
 #elif defined DEVICE_HAS_DUAL_SX126x_SX126x
   // DUALBAND 868/915 MHz & 433 MHz !
   #if defined FREQUENCY_BAND_915_MHZ_FCC && defined FREQUENCY_BAND_868_MHZ && defined FREQUENCY_BAND_433_MHZ
     SetupMetaData.FrequencyBand_allowed_mask = 0b000110; // 915 FCC, 868
+  #else
+    #error Unknown Frequencyband !
   #endif
 #elif defined FREQUENCY_BAND_915_MHZ_FCC && defined FREQUENCY_BAND_868_MHZ && \
       defined FREQUENCY_BAND_433_MHZ && defined FREQUENCY_BAND_70_CM_HAM
@@ -60,6 +64,8 @@ void setup_configure_metadata(void)
     SetupMetaData.FrequencyBand_allowed_mask = 0b010000; // 70 cm HAM, not editable
 #elif defined FREQUENCY_BAND_866_MHZ_IN
     SetupMetaData.FrequencyBand_allowed_mask = 0b100000; // 866 MHz IN, not editable
+#else
+    #error Unknown Frequencyband !
 #endif
 
     //-- Mode: "50 Hz,31 Hz,19 Hz,FLRC,FSK"
@@ -205,7 +211,7 @@ void setup_configure_metadata(void)
 #endif
 
 
-void inc_bindphrase_char(char* s, uint8_t pos)
+void inc_bindphrase_char(char* const s, uint8_t pos)
 {
     char* cptr = strchr(bindphrase_chars, s[pos]);
     uint8_t n = (cptr) ? cptr - bindphrase_chars + 1 : 0; // must not happen that c is not found, but play it safe
@@ -216,7 +222,7 @@ void inc_bindphrase_char(char* s, uint8_t pos)
 
 // make the default bind phrases all different for all config id's
 // this provides a sort of model match per default
-void setup_default_bindphrase(char* s, uint8_t config_id, const char* bindphrase_default)
+void setup_default_bindphrase(char* const s, uint8_t config_id, const char* bindphrase_default)
 {
     strcpy(s, bindphrase_default);
     if (config_id == 0) return;
@@ -262,6 +268,11 @@ void setup_default(uint8_t config_id)
     Setup.Tx[config_id].SendRadioStatus = SETUP_TX_SEND_RADIO_STATUS;
     Setup.Tx[config_id].Buzzer = SETUP_TX_BUZZER;
     Setup.Tx[config_id].MavlinkComponent = SETUP_TX_MAV_COMPONENT;
+    Setup.Tx[config_id].PowerSwitchChannel = POWER_SWITCH_CHANNEL_OFF; //SETUP_TX_POWER_SW_CH;
+
+    Setup.Tx[config_id].WifiProtocol = WIFI_PROTOCOL_UDP;
+    Setup.Tx[config_id].WifiChannel = WIFI_CHANNEL_6;
+    Setup.Tx[config_id].WifiPower = WIFI_POWER_MED;
 
     Setup.Rx.Power = SETUP_RX_POWER;
     Setup.Rx.Diversity = SETUP_RX_DIVERSITY;
@@ -274,6 +285,7 @@ void setup_default(uint8_t config_id)
     Setup.Rx.SerialLinkMode = SETUP_RX_SERIAL_LINK_MODE;
     Setup.Rx.SendRadioStatus = SETUP_RX_SEND_RADIO_STATUS;
     Setup.Rx.SendRcChannels = SETUP_RX_SEND_RC_CHANNELS;
+    Setup.Rx.PowerSwitchChannel = POWER_SWITCH_CHANNEL_OFF; //SETUP_RX_POWER_SW_CH;
 
     for (uint8_t ch = 0; ch < 12; ch++) { Setup.Rx.FailsafeOutChannelValues_Ch1_Ch12[ch] = 0; }
     for (uint8_t ch = 0; ch < 4; ch++) { Setup.Rx.FailsafeOutChannelValues_Ch13_Ch16[ch] = 1; }
@@ -312,15 +324,11 @@ void setup_sanitize_config(uint8_t config_id)
   // DUALBAND 2.4 GHz & 868/915 MHz !
   #if defined FREQUENCY_BAND_2P4_GHZ && defined FREQUENCY_BAND_915_MHZ_FCC && defined FREQUENCY_BAND_868_MHZ
     uint8_t frequency_band_default = SETUP_FREQUENCY_BAND_868_MHZ;
-  #else
-    #error Unknown Frequencyband !
   #endif
 #elif defined DEVICE_HAS_DUAL_SX126x_SX126x
   // DUALBAND 868/915 MHz & 433 MHz !
   #if defined FREQUENCY_BAND_915_MHZ_FCC && defined FREQUENCY_BAND_868_MHZ && defined FREQUENCY_BAND_433_MHZ
     uint8_t frequency_band_default = SETUP_FREQUENCY_BAND_868_MHZ;
-  #else
-    #error Unknown Frequencyband !
   #endif
 #elif defined FREQUENCY_BAND_915_MHZ_FCC && defined FREQUENCY_BAND_868_MHZ && \
       defined FREQUENCY_BAND_433_MHZ && defined FREQUENCY_BAND_70_CM_HAM
@@ -343,8 +351,6 @@ void setup_sanitize_config(uint8_t config_id)
     uint8_t frequency_band_default = SETUP_FREQUENCY_BAND_70_CM_HAM;
 #elif defined FREQUENCY_BAND_866_MHZ_IN
     uint8_t frequency_band_default = SETUP_FREQUENCY_BAND_866_MHZ_IN;
-#else
-    #error Unknown Frequencyband !
 #endif
     if (Setup.Common[config_id].FrequencyBand >= SETUP_FREQUENCY_BAND_NUM) {
         Setup.Common[config_id].FrequencyBand = (SETUP_FREQUENCY_BAND_ENUM)frequency_band_default;
@@ -398,6 +404,8 @@ void setup_sanitize_config(uint8_t config_id)
     SANITIZE(Tx[config_id].Buzzer, BUZZER_NUM, SETUP_TX_BUZZER, BUZZER_OFF);
     TST_NOTALLOWED(Tx_Buzzer_allowed_mask, Tx[config_id].Buzzer, BUZZER_OFF);
 
+    SANITIZE(Tx[config_id].PowerSwitchChannel, POWER_SWITCH_CHANNEL_NUM, POWER_SWITCH_CHANNEL_OFF, POWER_SWITCH_CHANNEL_OFF);
+
     // device cannot use mBridge (pin5) and CRSF (pin5) at the same time !
     // dest\src | NONE    | CRSF    | INPORT  | MBRIDGE
     // -------------------------------------------------
@@ -408,6 +416,16 @@ void setup_sanitize_config(uint8_t config_id)
         (Setup.Tx[config_id].SerialDestination == SERIAL_DESTINATION_MBRDIGE)) {
         Setup.Tx[config_id].SerialDestination = SERIAL_DESTINATION_SERIAL;
     }
+
+#ifdef USE_ESP_WIFI_BRIDGE_RST_GPIO0
+    SANITIZE(Tx[config_id].WifiProtocol, WIFI_PROTOCOL_NUM, WIFI_PROTOCOL_UDP, WIFI_PROTOCOL_UDP);
+    SANITIZE(Tx[config_id].WifiChannel, WIFI_CHANNEL_NUM, WIFI_CHANNEL_6, WIFI_CHANNEL_6);
+    SANITIZE(Tx[config_id].WifiPower, WIFI_POWER_NUM, WIFI_POWER_MED, WIFI_POWER_MED);
+#else
+    Setup.Tx[config_id].WifiProtocol = WIFI_PROTOCOL_UDP; // force them to default
+    Setup.Tx[config_id].WifiChannel = WIFI_CHANNEL_6;
+    Setup.Tx[config_id].WifiPower = WIFI_POWER_MED;
+#endif
 
     //-- Rx:
 
@@ -445,6 +463,8 @@ void setup_sanitize_config(uint8_t config_id)
     SANITIZE(Rx.SendRadioStatus, RX_SEND_RADIO_STATUS_NUM, SETUP_RX_SEND_RADIO_STATUS, RX_SEND_RADIO_STATUS_OFF);
 
     SANITIZE(Rx.SendRcChannels, SEND_RC_CHANNELS_NUM, SETUP_RX_SEND_RC_CHANNELS, SEND_RC_CHANNELS_OFF);
+
+    SANITIZE(Rx.PowerSwitchChannel, POWER_SWITCH_CHANNEL_NUM, POWER_SWITCH_CHANNEL_OFF, POWER_SWITCH_CHANNEL_OFF);
 
     //-- Spares and deprecated options:
     // should be 0xFF'ed
@@ -517,7 +537,7 @@ void configure_mode(uint8_t mode)
         break;
 
     default:
-        while (1) {} // must not happen, should have been resolved in setup_sanitize()
+        while(1){} // must not happen, should have been resolved in setup_sanitize()
 
     }
 
@@ -537,7 +557,7 @@ void configure_mode(uint8_t mode)
         Config.Sx2.LoraConfigIndex = SX128x_LORA_CONFIG_BW800_SF5_CRLI4_5;
         break;
     default:
-        while (1) {} // must not happen, should have been resolved in setup_sanitize()
+        while(1){} // must not happen, should have been resolved in setup_sanitize()
     }
 #elif defined DEVICE_HAS_DUAL_SX126x_SX126x
     // DUALBAND 868/915 MHz & 433 MHz !
@@ -570,17 +590,12 @@ void setup_configure_config(uint8_t config_id)
     Config.FrameSyncWord = fmav_crc_calculate((uint8_t*)&bind_dblword, 4); // condense it into a u16
 
     //-- SX12xx Config: SyncWord
+    // note: SyncWord will be modified below by Ortho
 
     Config.Sx.FlrcSyncWord = bind_dblword;
-
-    if (Setup.Common[config_id].Ortho > ORTHO_NONE) {
-        Config.FrameSyncWord += 0x1111 * Config.Fhss.Ortho; // modify also FrameSyncWord
-        Config.Sx.FlrcSyncWord += 0x11111111 * Config.Fhss.Ortho;
-    }
-
     Config.Sx2.FlrcSyncWord = Config.Sx.FlrcSyncWord;
 
-  //-- Diversity
+    //-- Diversity
 
 #if defined DEVICE_HAS_DIVERSITY || defined DEVICE_HAS_DIVERSITY_SINGLE_SPI
   #ifdef DEVICE_IS_TRANSMITTER
@@ -625,7 +640,7 @@ void setup_configure_config(uint8_t config_id)
         Config.TransmitUseAntenna2 = true;
         break;
     default:
-        while (1) {} // must not happen, should have been resolved in setup_sanitize()
+        while(1){} // must not happen, should have been resolved in setup_sanitize()
     }
 #elif defined DEVICE_HAS_DUAL_SX126x_SX128x || defined DEVICE_HAS_DUAL_SX126x_SX126x
     // DUALBAND 2.4 GHz & 868/915 MHz or 868/915 MHz & 433 MHz !
@@ -674,27 +689,17 @@ void setup_configure_config(uint8_t config_id)
 
 #ifdef DEVICE_HAS_DUAL_SX126x_SX128x
     // DUALBAND 2.4 GHz & 868/915 MHz !
-    switch (Config.FrequencyBand) {
-    case SETUP_FREQUENCY_BAND_2P4_GHZ:
-        Config.Sx2.FrequencyBand = SX_FHSS_CONFIG_FREQUENCY_BAND_2P4_GHZ;
-        break;
-    default:
-        while (1) {}
-    }
+    Config.Sx2.FrequencyBand = SX_FHSS_CONFIG_FREQUENCY_BAND_2P4_GHZ;
 #elif defined DEVICE_HAS_DUAL_SX126x_SX126x
     // DUALBAND 868/915 MHz & 433 MHz !
-    switch (Config.FrequencyBand) {
-    case SETUP_FREQUENCY_BAND_433_MHZ:
-        Config.Sx2.FrequencyBand = SX_FHSS_CONFIG_FREQUENCY_BAND_433_MHZ;
-        break;
-    default:
-        while (1) {}
-    }
+    Config.Sx2.FrequencyBand = SX_FHSS_CONFIG_FREQUENCY_BAND_433_MHZ;
 #endif
+
     //-- Fhss
 
     Config.Fhss.FrequencyBand = Config.Sx.FrequencyBand;
 
+    Config.Fhss.FrequencyBand_allowed_mask = 0;
     if (SetupMetaData.FrequencyBand_allowed_mask & (1 << SETUP_FREQUENCY_BAND_2P4_GHZ)) {
         Config.Fhss.FrequencyBand_allowed_mask |= (1 << SX_FHSS_CONFIG_FREQUENCY_BAND_2P4_GHZ);
     }
@@ -721,6 +726,13 @@ void setup_configure_config(uint8_t config_id)
 
     Config.Fhss.Ortho = Setup.Common[config_id].Ortho;
 
+    // modify also FrameSyncWord, Sx.FlrcSyncWord
+    if (Config.Fhss.Ortho > ORTHO_NONE) {
+        Config.FrameSyncWord += 0x1111 * Config.Fhss.Ortho;
+        Config.Sx.FlrcSyncWord += 0x11111111 * Config.Fhss.Ortho;
+        Config.Sx2.FlrcSyncWord = Config.Sx.FlrcSyncWord;
+    }
+
     //Config.FhssSeed = bind_dblword;
     // this is much better for narrow bands, like 868 MHz
     // we could make it dependable with a #ifdef, but what's the point
@@ -734,7 +746,7 @@ void setup_configure_config(uint8_t config_id)
         case MODE_19HZ: Config.Fhss.Num = FHSS_NUM_BAND_2P4_GHZ_19HZ_MODE; break;
         case MODE_FLRC_111HZ: Config.Fhss.Num = FHSS_NUM_BAND_2P4_GHZ; break;
         default:
-            while (1) {} // must not happen, should have been resolved in setup_sanitize()
+            while(1){} // must not happen, should have been resolved in setup_sanitize()
         }
         break;
     case SX_FHSS_CONFIG_FREQUENCY_BAND_915_MHZ_FCC:
@@ -751,14 +763,14 @@ void setup_configure_config(uint8_t config_id)
         case MODE_31HZ: Config.Fhss.Num = FHSS_NUM_BAND_70_CM_HAM; break;
         case MODE_19HZ: Config.Fhss.Num = FHSS_NUM_BAND_70_CM_HAM_19HZ_MODE; break;
         default:
-            while (1) {} // must not happen, should have been resolved in setup_sanitize()
+            while(1){} // must not happen, should have been resolved in setup_sanitize()
         }
         break;
     case SX_FHSS_CONFIG_FREQUENCY_BAND_866_MHZ_IN:
         Config.Fhss.Num = FHSS_NUM_BAND_866_MHZ_IN;
         break;
     default:
-        while (1) {} // must not happen, should have been resolved in setup_sanitize()
+        while(1){} // must not happen, should have been resolved in setup_sanitize()
     }
 
     Config.Fhss2 = Config.Fhss;
@@ -772,7 +784,7 @@ void setup_configure_config(uint8_t config_id)
     case MODE_19HZ: Config.Fhss2.Num = FHSS_NUM_BAND_2P4_GHZ_19HZ_MODE; break;
     case MODE_FSK_50HZ: Config.Fhss2.Num = FHSS_NUM_BAND_2P4_GHZ; break; // FSK for SX126x implies 50 Hz mode for SX128x
     default:
-        while (1) {} // must not happen, should have been resolved in setup_sanitize()
+        while(1){} // must not happen, should have been resolved in setup_sanitize()
     }
 #elif defined DEVICE_HAS_DUAL_SX126x_SX126x
     // DUALBAND 868/915 MHz & 433 MHz !
@@ -782,7 +794,7 @@ void setup_configure_config(uint8_t config_id)
     case MODE_31HZ: Config.Fhss2.Num = FHSS_NUM_BAND_433_MHZ; break;
     case MODE_19HZ: Config.Fhss2.Num = FHSS_NUM_BAND_433_MHZ; break;
     default:
-        while (1) {} // must not happen, should have been resolved in setup_sanitize()
+        while(1){} // must not happen, should have been resolved in setup_sanitize()
     }
 #endif
 
@@ -830,7 +842,7 @@ void setup_configure_config(uint8_t config_id)
         Config.UseCrsf = true;
     }
     if (Config.UseMbridge && Config.UseCrsf) {
-        while (1) {} // mBridge and CRSF cannot be used simultaneously, must not happen
+        while(1){} // mBridge and CRSF cannot be used simultaneously, must not happen
     }
   #endif
   #ifdef USE_IN
@@ -838,7 +850,7 @@ void setup_configure_config(uint8_t config_id)
         Config.UseIn = true;
     }
     if ((Config.UseMbridge && Config.UseIn) || (Config.UseCrsf && Config.UseIn)) {
-        while (1) {} // In and mBridge or CRSF cannot be used simultaneously, must not happen
+        while(1){} // In and mBridge or CRSF cannot be used simultaneously, must not happen
     }
   #endif
 #endif
@@ -917,28 +929,8 @@ bool doEEPROMwrite;
 
     doEEPROMwrite = false;
     if (Setup.Layout != SETUPLAYOUT) {
-        if (Setup.Layout < SETUPLAYOUT_L0_3_29) {
-            strstrbufcpy(Setup.Common[0].BindPhrase, Setup.__BindPhrase, 6);
-            Setup.Common[0].FrequencyBand = Setup.__FrequencyBand;
-            Setup.Common[0].Mode = Setup.__Mode;
-            for (uint8_t id = 1; id < SETUP_CONFIG_NUM; id++) setup_default(id); // default all other tables
-            Setup._ConfigId = 0;
-        } else
-        if (Setup.Layout < SETUPLAYOUT_L0_3_35) {
-            for (uint8_t id = 0; id < SETUP_CONFIG_NUM; id++) {
-                // Tx ChannelSource rearranged
-                uint8_t tx_channel_source = Setup.Tx[id].ChannelsSource;
-                switch (tx_channel_source) {
-                case L0329_CHANNEL_SOURCE_MBRIDGE: Setup.Tx[id].ChannelsSource = CHANNEL_SOURCE_MBRIDGE; break;
-                case L0329_CHANNEL_SOURCE_CRSF: Setup.Tx[id].ChannelsSource = CHANNEL_SOURCE_CRSF; break;
-                }
-                // Tx SerialDestination rearranged
-                uint8_t tx_serial_destination = Setup.Tx[id].SerialDestination;
-                switch (tx_serial_destination) {
-                case L0329_SERIAL_DESTINATION_MBRDIGE: Setup.Tx[id].SerialDestination = SERIAL_DESTINATION_MBRDIGE; break;
-                case L0329_SERIAL_DESTINATION_SERIAL2: Setup.Tx[id].SerialDestination = SERIAL_DESTINATION_SERIAL2; break;
-                }
-            }
+        if (Setup.Layout < SETUPLAYOUT) {
+            // there would be lots to do but didn't do layout version-ing properly so far
         } else {
             for (uint8_t id = 0; id < SETUP_CONFIG_NUM; id++) setup_default(id);
             Setup._ConfigId = 0;

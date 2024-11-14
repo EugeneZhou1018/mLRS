@@ -233,6 +233,7 @@ void pack_rxframe(
     _pack_rxframe_w_type(frame, FRAME_TYPE_RX, frame_stats, payload, payload_len);
 }
 
+
 // returns 0 if OK !!
 uint8_t check_rxframe(tRxFrame* const frame)
 {
@@ -252,7 +253,6 @@ uint16_t crc;
 
     return CHECK_OK;
 }
-
 
 
 //-------------------------------------------------------
@@ -275,6 +275,7 @@ void cmdframerxparameters_rxparams_from_rxsetup(tCmdFrameRxParameters* const rx_
     // deprecated rx_params->Buzzer = Setup.Rx.Buzzer;
     rx_params->SendRcChannels = Setup.Rx.SendRcChannels;
     // deprecated rx_params->RadioStatusMethod = Setup.Rx.RadioStatusMethod;
+    rx_params->PowerSwitchChannel = Setup.Rx.PowerSwitchChannel;
 
     for (uint8_t i = 0; i < 12; i++) {
         rx_params->FailsafeOutChannelValues_Ch1_Ch12[i] = Setup.Rx.FailsafeOutChannelValues_Ch1_Ch12[i];
@@ -302,6 +303,7 @@ void cmdframerxparameters_rxparams_to_rxsetup(tCmdFrameRxParameters* const rx_pa
     // deprecated Setup.Rx.Buzzer = rx_params->Buzzer;
     Setup.Rx.SendRcChannels = rx_params->SendRcChannels;
     // deprecated Setup.Rx.RadioStatusMethod = rx_params->RadioStatusMethod;
+    Setup.Rx.PowerSwitchChannel = rx_params->PowerSwitchChannel;
 
     for (uint8_t i = 0; i < 12; i++) {
         Setup.Rx.FailsafeOutChannelValues_Ch1_Ch12[i] = rx_params->FailsafeOutChannelValues_Ch1_Ch12[i];
@@ -334,7 +336,7 @@ tRxCmdFrameRxSetupData* rx_setupdata = (tRxCmdFrameRxSetupData*)frame->payload;
     SetupMetaData.rx_available = true;
 
     SetupMetaData.rx_firmware_version = version_from_u16(rx_setupdata->firmware_version_u16);
-    SetupMetaData.rx_setup_layout = rx_setupdata->setup_layout;
+    SetupMetaData.rx_setup_layout = version_from_u16(rx_setupdata->setup_layout_u16);
     strstrbufcpy(SetupMetaData.rx_device_name, rx_setupdata->device_name_20, 20);
     SetupMetaData.rx_actual_power_dbm = rx_setupdata->actual_power_dbm;
     SetupMetaData.rx_actual_diversity = rx_setupdata->actual_diversity;
@@ -385,7 +387,7 @@ tRxCmdFrameRxSetupData rx_setupdata = {};
     rx_setupdata.cmd = FRAME_CMD_RX_SETUPDATA;
 
     rx_setupdata.firmware_version_u16 = version_to_u16(VERSION);
-    rx_setupdata.setup_layout = SETUPLAYOUT;
+    rx_setupdata.setup_layout_u16 = version_to_u16(SETUPLAYOUT);
     strbufstrcpy(rx_setupdata.device_name_20, DEVICE_NAME, 20);
     rx_setupdata.actual_power_dbm = sx.RfPower_dbm();
     rx_setupdata.actual_diversity = Config.Diversity;

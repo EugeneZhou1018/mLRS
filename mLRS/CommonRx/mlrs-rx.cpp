@@ -95,6 +95,7 @@
 #include "../Common/common.h"
 #include "../Common/diversity.h"
 #include "../Common/arq.h"
+#include "../Common/rf_power.h"
 //#include "../Common/test.h" // un-comment if you want to compile for board test
 
 #include "out_interface.h" // this includes uart.h, out.h, declares tOut out
@@ -105,6 +106,7 @@ tPowerupCounter powerup;
 tRDiversity rdiversity;
 tTDiversity tdiversity;
 tTransmitArq tarq;
+tRfPower rfpower;
 
 
 // is required in bind.h
@@ -528,30 +530,6 @@ bool connected(void)
 
 void main_loop(void)
 {
-#if 0
-// for deving DroneCAN
-  delay_init();
-  timer_init();
-  leds_init();
-  dbg.Init();
-  dronecan.Init();
-  tick_1hz = 0;
-  doSysTask = 0;
-  while (1) {
-    if (doSysTask) {
-      doSysTask = 0;
-      DECc(tick_1hz, SYSTICK_DELAY_MS(1000));
-      if (!tick_1hz) {
-        led_green_toggle();
-        dbg.puts(".");
-      }
-      dronecan.Tick_ms();
-    }
-    dronecan.Do();
-  }
-return;
-#endif
-
 #ifdef BOARD_TEST_H
     main_test();
 #endif
@@ -575,6 +553,7 @@ RESTARTCONTROLLER
     bind.Init();
     fhss.Init(&Config.Fhss, &Config.Fhss2);
     fhss.Start();
+    rfpower.Init();
 
     sx.SetRfFrequency(fhss.GetCurrFreq());
     sx2.SetRfFrequency(fhss.GetCurrFreq2());
@@ -665,6 +644,7 @@ INITCONTROLLER_END
         break;
 
     case LINK_STATE_TRANSMIT:
+        rfpower.Update();
         do_transmit(tdiversity.Antenna());
         link_state = LINK_STATE_TRANSMIT_WAIT;
         irq_status = irq2_status = 0; // important, in low connection condition, RxDone isr could trigger
@@ -914,6 +894,7 @@ dbg.puts(s8toBCD_s(stats.last_rssi2));*/
             mavlink.SendRcData(out.GetRcDataPtr(), frame_missed, false);
             msp.SendRcData(out.GetRcDataPtr(), frame_missed, false);
             dronecan.SendRcData(out.GetRcDataPtr(), false);
+            rfpower.Set(&rcData, Setup.Rx.PowerSwitchChannel, Setup.Rx.Power);
         } else {
             if (connect_occured_once) {
                 // generally output a signal only if we had a connection at least once
@@ -923,6 +904,7 @@ dbg.puts(s8toBCD_s(stats.last_rssi2));*/
                 msp.SendRcData(out.GetRcDataPtr(), true, true);
                 dronecan.SendRcData(out.GetRcDataPtr(), true);
             }
+            rfpower.Set(Setup.Rx.Power); // force to Setup Power
         }
     }//end of if(doPostReceive2)
 

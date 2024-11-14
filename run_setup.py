@@ -11,7 +11,7 @@
  2. calls run_copy_st_drivers.py to populate the target ST Driver folders
  3. calls fmav_generate_c_library.py to generate MAVLink library files
  4. calls dronecan_generate_c_library.py to generate DroneCAN library files
- version 29.08.2024
+ version 31.10.2024
 ********************************************************
 '''
 import os
@@ -34,7 +34,8 @@ def os_system(arg):
         res = subprocess.call(arg)
     if res != 0:
         print('# ERROR (errno =',res,') DONE #')
-        os.system("pause")
+        print('Press Enter to continue') 
+        input()
         exit(1)
 
 
@@ -52,11 +53,12 @@ def check_python():
     global python_cmd
     if _check_python_version('python') == 3:
         python_cmd = 'python'
-    elif check_python('python3') == 3:
+    elif _check_python_version('python3') == 3:
         python_cmd = 'python3'
     else:
         print("ERROR: Python 3 not found on your system. Please make sure Python 3 is available.")
-        os.system("pause")
+        print('Press Enter to continue') 
+        input()
         exit(1)
 
 
@@ -104,4 +106,5 @@ copy_st_drivers()
 generate_mavlink_c_library()
 generate_dronecan_c_library()
 
-os.system("pause")
+print('Press Enter to continue') 
+input()

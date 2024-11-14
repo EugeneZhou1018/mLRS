@@ -9,15 +9,26 @@
 // MSP v2: https://github.com/iNavFlight/inav/wiki/MSP-V2
 //
 // STX1           '$'
-// STX2           'X', 'M'
+// STX2           'X'
 // type           '<', '>', '!'
-// flag           0
+// flag           0x01: do not respond
 // function_1     LSB
 // function_2     MSB
 // len_1          LSB
 // len_2          MSB
 // payload
 // crc8           starting from flag up to inclusive payload
+//
+// MSP v1:
+//
+// STX1           '$'
+// STX2           'M'
+// type           '<', '>', '!'
+// len
+// function
+// payload
+// crc8           starting from len to inclusive payload, crc is ^=
+
 //
 //  https://github.com/iNavFlight/inav/blob/master/src/main/fc/fc_msp.c
 //
@@ -40,15 +51,17 @@
 #define MSP_MAGIC_1               '$'
 #define MSP_MAGIC_2_V1            'M'
 #define MSP_MAGIC_2_V2            'X'
-#define MSP_TYPE_REQUEST          '<'
-#define MSP_TYPE_RESPONSE         '>'
-#define MSP_TYPE_ERROR            '!'
-#define MSP_HEADER_LEN            8
-#define MSP_FRAME_LEN_MAX         (8 + MSP_PAYLOAD_LEN_MAX + 1) // =  HEADER_LEN_MAX + PAYLOAD_LEN_MAX + CHECKSUM_LEN
+//#define MSP_TYPE_REQUEST          '<'
+//#define MSP_TYPE_RESPONSE         '>'
+//#define MSP_TYPE_ERROR            '!'
+#define MSP_V1_HEADER_LEN         5
+#define MSP_V2_HEADER_LEN         8
+
+#define MSP_FRAME_LEN_MAX         (8 + MSP_PAYLOAD_LEN_MAX + 1) // use longest possible, =  HEADER_LEN_MAX + PAYLOAD_LEN_MAX + CHECKSUM_LEN
 
 
 typedef struct {
-    uint8_t magic2;
+    uint8_t magic2; // allows to differentiate between V1 and V2
     uint8_t type;
     uint8_t flag;
     uint16_t function;
@@ -61,9 +74,23 @@ typedef struct {
 
 
 typedef enum {
+    MSP_TYPE_REQUEST    = '<',
+    MSP_TYPE_RESPONSE   = '>',
+    MSP_TYPE_ERROR      = '!',
+} MSP_TYPE_ENUM;
+
+
+typedef enum {
+    MSP_FLAG_NONE         = 0,
+    MSP_FLAG_NO_RESPONSE  = 0x01,
+} MSP_FLAG_ENUM;
+
+
+typedef enum {
     MSP_MODE_RANGES               = 34, // len = 160
     MSP_ADJUSTMENT_RANGES         = 52, // len = 120
     MSP_SONAR_ALTITUDE            = 58,
+    MSP_IDENT                     = 100, // not used by INAV, but by a GCS to detect it's not an old INAV
     MSP_STATUS                    = 101,
     MSP_RAW_IMU                   = 102,
     MSP_RAW_GPS                   = 106,
@@ -86,6 +113,8 @@ typedef enum {
 
     MSP2_COMMON_MOTOR_MIXER             = 0x1005, // 4101, len = 192
     MSP2_COMMON_SETTING_INFO            = 0x1007, // 4103, len = large, varies
+    MSP2_COMMON_SET_MSP_RC_LINK_STATS   = 0x100D, // 4109
+    MSP2_COMMON_SET_MSP_RC_INFO         = 0x100E, // 4110
 
     MSP2_INAV_STATUS                    = 0x2000,
     MSP2_INAV_ANALOG                    = 0x2002,
@@ -289,6 +318,14 @@ typedef enum {
     INAV_SENSOR_STATUS_HW_FAILURE   = 15,
 } INAV_SENSOR_STATUS_FLAGS_ENUM;
 
+
+// see src/main/fc/runtime_config.h, armingFlag_e
+typedef enum {
+    INAV_ARMING_FLAGS_ARMED           = (1 << 2),
+    INAV_ARMING_FLAGS_WAS_EVER_ARMED  = (1 << 3),
+} INAV_ARMING_FLAGS_ENUM;
+
+
 MSP_PACKED(
 typedef struct
 {
@@ -353,6 +390,36 @@ typedef struct
 #define MSP_SET_RAW_RC_LEN  32
 
 
+// MSP2_COMMON_SET_MSP_RC_LINK_STATS  0x100D, // 4109
+MSP_PACKED(
+typedef struct
+{
+    uint8_t sublink_id;                         // = 1 always
+    uint8_t valid_link;                         // not currently used in INAV
+    uint8_t uplink_rssi_perc;
+    uint8_t uplink_rssi;                        // negative RSSI value in dBm (will be converted to negative value)
+    uint8_t downlink_link_quality;
+    uint8_t uplink_link_quality;
+    uint8_t uplink_snr;                         // will be converted to int8_t
+}) tMspCommonSetMspRcLinkStats; // 7 bytes
+
+#define MSP_COMMON_SET_MSP_RC_LINK_STATS_LEN  7
+
+
+// MSP2_COMMON_SET_MSP_RC_INFO  0x100E, // 4110
+MSP_PACKED(
+typedef struct
+{
+    uint8_t sublink_id;                         // = 0 always for now
+    uint16_t uplink_tx_power;                   // power in mW
+    uint16_t downlink_tx_power;                 // power in mW
+    char band[4];
+    char mode[6];
+}) tMspCommonSetMspRcInfo; // 15 bytes
+
+#define MSP_COMMON_SET_MSP_RC_INFO_LEN  15
+
+
 //-------------------------------------------------------
 // MSP X Messages
 //-------------------------------------------------------
@@ -362,9 +429,11 @@ typedef enum {
 } MSPX_FUNCTION_ENUM;
 
 
-// essentially mirrors INAV's flightModeFlags_e enum
+// modes we can extract from BOX_NAMES, and which are of interest to us
+// this is different to but mostly mirrors INAV's flightModeFlags_e enum
 // https://github.com/iNavFlight/inav/blob/master/src/main/fc/runtime_config.h#L89-L109
-// includes all and more but misses
+// adds ARM mode
+// includes all INAV modes (in different order though), except
 //    NAV_FW_AUTOLAND
 typedef enum {
     INAV_FLIGHT_MODES_ARM = 0,
@@ -461,41 +530,50 @@ const tMspBoxArray inavBoxes[INAV_BOXES_COUNT] = {
 };
 
 
-void inav_flight_mode_name4(char* const name4, uint32_t flight_mode)
+void inav_flight_mode_str5(char* const s, uint32_t flight_mode, uint32_t arming_flags)
 {
+    if ((arming_flags & ((uint32_t)1 << INAV_ARMING_FLAGS_ARMED)) != 0) { // some arming flags are raised
+        strcpy(s, "!ERR");
+        return;
+    }
+
     #define MSP_FLIGHT_MODE(fm) (flight_mode & ((uint32_t)1 << (fm)))
 
     // follow INAV's static void crsfFrameFlightMode()
     // https://github.com/iNavFlight/inav/blob/master/src/main/telemetry/crsf.c#L317-L374
     // we don't do "HRST" and "LAND"
     if (MSP_FLIGHT_MODE(INAV_FLIGHT_MODES_AIR_MODE)) {
-        strcpy(name4, "AIR"); // not shown in OSD
+        strcpy(s, "AIR"); // not shown in OSD
     } else {
-        strcpy(name4, "ACRO");
+        strcpy(s, "ACRO");
     }
 
     if (MSP_FLIGHT_MODE(INAV_FLIGHT_MODES_FAILSAFE)) {
-        strcpy(name4, "!FS!");
+        strcpy(s, "!FS!");
     } else if (MSP_FLIGHT_MODE(INAV_FLIGHT_MODES_MANUAL)) {
-        strcpy(name4, "MANU");
+        strcpy(s, "MANU");
     } else if (MSP_FLIGHT_MODE(INAV_FLIGHT_MODES_NAV_RTH)) {
-        strcpy(name4, "RTH"); // shown as "WRTH" in OSD if waypoint mission RTH is active
+        strcpy(s, "RTH"); // shown as "WRTH" in OSD if waypoint mission RTH is active
     } else if (MSP_FLIGHT_MODE(INAV_FLIGHT_MODES_NAV_POSHOLD)) {
-        strcpy(name4, "HOLD"); // shown as "LOTR" in OSD if it is an airplane
+        strcpy(s, "HOLD"); // shown as "LOTR" in OSD if it is an airplane
     } else if (MSP_FLIGHT_MODE(INAV_FLIGHT_MODES_NAV_COURSE_HOLD) && MSP_FLIGHT_MODE(INAV_FLIGHT_MODES_NAV_ALTHOLD)) {
-        strcpy(name4, "CRUZ");
+        strcpy(s, "CRUZ");
     } else if (MSP_FLIGHT_MODE(INAV_FLIGHT_MODES_NAV_COURSE_HOLD)) {
-        strcpy(name4, "CRSH");
+        strcpy(s, "CRSH");
     } else if (MSP_FLIGHT_MODE(INAV_FLIGHT_MODES_NAV_WP)) {
-        strcpy(name4, "WP");
+        strcpy(s, "WP");
     } else if (MSP_FLIGHT_MODE(INAV_FLIGHT_MODES_NAV_ALTHOLD)) {
-        strcpy(name4, "AH");
+        strcpy(s, "AH");
     } else if (MSP_FLIGHT_MODE(INAV_FLIGHT_MODES_ANGLE)) {
-        strcpy(name4, "ANGL");
+        strcpy(s, "ANGL");
     } else if (MSP_FLIGHT_MODE(INAV_FLIGHT_MODES_HORIZON)) {
-        strcpy(name4, "HOR");
+        strcpy(s, "HOR");
     } else if (MSP_FLIGHT_MODE(INAV_FLIGHT_MODES_ANGLE_HOLD)) {
-        strcpy(name4, "ANGH");
+        strcpy(s, "ANGH");
+    }
+
+    if (!MSP_FLIGHT_MODE(INAV_FLIGHT_MODES_ARM)) {
+        strcat(s, "*");
     }
 }
 
@@ -503,6 +581,10 @@ void inav_flight_mode_name4(char* const name4, uint32_t flight_mode)
 //-- check some sizes
 
 STATIC_ASSERT(INAV_FLIGHT_MODES_COUNT < 32, "INAV_FLIGHT_MODES_COUNT too many flight modes")
+
+STATIC_ASSERT(sizeof(tMspSetRawRc) == MSP_SET_RAW_RC_LEN, "MSP_SET_RAW_RC_LEN missmatch")
+STATIC_ASSERT(sizeof(tMspCommonSetMspRcLinkStats) == MSP_COMMON_SET_MSP_RC_LINK_STATS_LEN, "MSP_COMMON_SET_MSP_RC_LINK_STATS_LEN missmatch")
+STATIC_ASSERT(sizeof(tMspCommonSetMspRcInfo) == MSP_COMMON_SET_MSP_RC_INFO_LEN, "MSP_COMMON_SET_MSP_RC_INFO_LEN missmatch")
 
 
 #endif // MSP_PROTOCOL_H

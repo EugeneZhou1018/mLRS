@@ -104,7 +104,7 @@ class Sx127xDriverCommon : public Sx127xDriverBase
 
     void SetLoraConfigurationByIndex(uint8_t index)
     {
-        if (index >= sizeof(Sx127xLoraConfiguration)/sizeof(Sx127xLoraConfiguration[0])) while (1) {} // must not happen
+        if (index >= sizeof(Sx127xLoraConfiguration)/sizeof(Sx127xLoraConfiguration[0])) while(1){} // must not happen
 
         lora_configuration = &(Sx127xLoraConfiguration[index]);
         SetLoraConfiguration(lora_configuration);
@@ -128,6 +128,12 @@ class Sx127xDriverCommon : public Sx127xDriverBase
 #else
         SetPowerParams(SX1276_PA_SELECT_PA_BOOST, SX1276_MAX_POWER_15_DBM, sx_power, SX1276_PA_RAMP_40_US);
 #endif
+    }
+
+    void UpdateRfPower(tSxGlobalConfig* const global_config)
+    {
+        gconfig->Power_dbm = global_config->Power_dbm;
+        SetRfPower_dbm(gconfig->Power_dbm);
     }
 
     void Configure(tSxGlobalConfig* const global_config)
@@ -236,7 +242,7 @@ class Sx127xDriverCommon : public Sx127xDriverBase
         RfPowerCalc(power_dbm, &sx_power, &actual_power_dbm);
 
         uint8_t index = gconfig->LoraConfigIndex;
-        if (index >= sizeof(Sx127xLoraConfiguration)/sizeof(Sx127xLoraConfiguration[0])) while (1) {} // must not happen
+        if (index >= sizeof(Sx127xLoraConfiguration)/sizeof(Sx127xLoraConfiguration[0])) while(1){} // must not happen
         lora_configuration = &(Sx127xLoraConfiguration[index]);
 
         symbol_time_us = calc_symbol_time_us(lora_configuration->SpreadingFactor, lora_configuration->Bandwidth);
