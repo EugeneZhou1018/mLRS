@@ -34,17 +34,17 @@
 		<link>
 			<name>Common</name>
 			<type>2</type>
-			<location>C:/mLRS/mLRS/Common</location>
+			<location>WORKSPACE_LOC/Common</location>
 		</link>
 		<link>
 			<name>CommonRx</name>
 			<type>2</type>
-			<location>C:/mLRS/mLRS/CommonRx</location>
+			<location>WORKSPACE_LOC/CommonRx</location>
 		</link>
 		<link>
 			<name>modules</name>
 			<type>2</type>
-			<location>C:/mLRS/mLRS/modules</location>
+			<location>WORKSPACE_LOC/modules</location>
 		</link>
 	</linkedResources>
 </projectDescription>
